@@ -15,9 +15,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copiar el resto del código del proyecto
 COPY . .
 
-# Generar automáticamente el archivo de secretos de Streamlit dentro del contenedor
-RUN mkdir -p /app/.streamlit
-RUN echo '[users.admin_epespo]\nname = "Secretaría General"\nrole = "admin"\npassword_hash = "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4"\n\n[users.direccion_epespo]\nname = "Dirección Académica"\nrole = "viewer"\npassword_hash = "0a373ff255c276ae8ffb22a074092b77e8ea75abeb52f758ee6e7920155b46d0"' > /app/.streamlit/secrets.toml
+# Generar automáticamente el archivo secrets.toml con los hashes SHA-256 correctos
+RUN python -c 'import hashlib, pathlib; \
+admin_hash = hashlib.sha256(b"admin1234").hexdigest(); \
+viewer_hash = hashlib.sha256(b"viewer1234").hexdigest(); \
+content = f"""[users.admin_epespo]\nname = \\"Secretaría General\\"\nrole = \\"admin\\"\npassword_hash = \\"{admin_hash}\\"\n\n[users.direccion_epespo]\nname = \\"Dirección Académica\\"\nrole = \\"viewer\\"\npassword_hash = \\"{viewer_hash}\\"\n"""; \
+pathlib.Path("/app/.streamlit").mkdir(parents=True, exist_ok=True); \
+pathlib.Path("/app/.streamlit/secrets.toml").write_text(content)'
 
 # Exponer el puerto predeterminado que exige Cloud Run
 EXPOSE 8080
