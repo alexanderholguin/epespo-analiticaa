@@ -27,25 +27,34 @@ if not render_login():
 # =============================================================
 # CONEXIÓN A LA BASE DE DATOS (CLOUD SQL / CLOUD RUN)
 # =============================================================
-import psycopg2
-
-# =============================================================
-# CONEXIÓN A LA BASE DE DATOS (CLOUD SQL VIA TCP)
-# =============================================================
 @st.cache_resource
 def obtener_motor_y_datos():
-    # COLOCA AQUÍ TUS DATOS REALES DE CLOUD SQL:
     db_user = os.environ.get("DB_USER", "postgres")
     db_pass = os.environ.get("DB_PASS", "epespo2026")
-    db_name = os.environ.get("DB_NAME", "epespo-analitica")
-    db_host = os.environ.get("DB_HOST", "34.26.21.37") # Ej: 34.xxx.xxx.xxx
-    db_port = os.environ.get("DB_PORT", "5432")
-
-    # Conexión estándar por TCP segura
-    DATABASE_URL = f"postgresql+psycopg2://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
+    db_name = os.environ.get("DB_NAME", "epespo_db")
+    
+    # OPCIÓN A: Si prefieres usar IP Pública de Cloud SQL (Reemplaza con tu IP si la usas):
+    db_host = os.environ.get("DB_HOST", "")
+    
+    if db_host:
+        DATABASE_URL = f"postgresql+psycopg2://{db_user}:{db_pass}@{db_host}:5432/{db_name}"
+    else:
+        # OPCIÓN B: Conexión por Socket Unix oficial de Cloud Run
+        cloud_sql_connection_name = "epespo:us-east1:epespo-analitica"
+        DATABASE_URL = f"postgresql+psycopg2://{db_user}:{db_pass}@/{db_name}?host=/cloudsql/{cloud_sql_connection_name}"
 
     engine = create_engine(DATABASE_URL)
     return engine
+
+
+engine = obtener_motor_y_datos()
+
+
+# FUNCIÓN QUE FALTABA
+def cargar_datos_completos():
+    query = "SELECT * FROM registros_epespo"
+    return pd.read_sql(query, con=engine)
+
 
 # =============================================================
 # ESTILOS CSS GLOBALES INSTITUCIONALES
