@@ -27,21 +27,20 @@ if not render_login():
 # =============================================================
 # CONEXIÓN A LA BASE DE DATOS (CLOUD SQL / CLOUD RUN)
 # =============================================================
+# =============================================================
+# CONEXIÓN A LA BASE DE DATOS (CLOUD SQL VIA IP PÚBLICA)
+# =============================================================
 @st.cache_resource
 def obtener_motor_y_datos():
     db_user = os.environ.get("DB_USER", "postgres")
     db_pass = os.environ.get("DB_PASS", "epespo2026")
     db_name = os.environ.get("DB_NAME", "epespo-analitica")
     
-    # IP Pública de tu Cloud SQL o configurada en variables de entorno
-    db_host = os.environ.get("DB_HOST", "34.26.21.37")
+    # ⚠️ COLOCA AQUÍ TU IP PÚBLICA REAL DE CLOUD SQL ENTRE LAS COMILLAS:
+    db_host = "34.26.21.37" 
     
-    if db_host and db_host != "34.26.21.37":
-        DATABASE_URL = f"postgresql+psycopg2://{db_user}:{db_pass}@{db_host}:5432/{db_name}"
-    else:
-        # Fallback a socket Unix por si usas la ruta interna
-        cloud_sql_connection_name = "epespo:us-east1:epespo-analitica"
-        DATABASE_URL = f"postgresql+psycopg2://{db_user}:{db_pass}@/{db_name}?host=/cloudsql/{cloud_sql_connection_name}"
+    # Forzamos la conexión por TCP usando la IP pública directamente
+    DATABASE_URL = f"postgresql+psycopg2://{db_user}:{db_pass}@{db_host}:5432/{db_name}"
 
     try:
         engine = create_engine(DATABASE_URL)
