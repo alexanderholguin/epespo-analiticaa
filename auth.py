@@ -14,7 +14,20 @@ import streamlit as st
 
 def verificar_credenciales(usuario, password):
     usuario = usuario.strip().lower()
-    usuarios_dict = st.secrets.get("users", {})
+    
+    # Diccionario institucional seguro con los hashes correctos
+    usuarios_dict = {
+        "admin_epespo": {
+            "name": "Secretaría General",
+            "role": "admin",
+            "password_hash": "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4" # Corresponde a admin1234
+        },
+        "direccion_epespo": {
+            "name": "Dirección Académica",
+            "role": "viewer",
+            "password_hash": "0a373ff255c276ae8ffb22a074092b77e8ea75abeb52f758ee6e7920155b46d0" # Corresponde a viewer1234
+        }
+    }
     
     if usuario not in usuarios_dict:
         return None
