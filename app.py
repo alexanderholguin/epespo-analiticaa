@@ -33,27 +33,40 @@ def obtener_motor_y_datos():
     db_pass = os.environ.get("DB_PASS", "epespo2026")
     db_name = os.environ.get("DB_NAME", "epespo-analitica")
     
-    # OPCIÓN A: Si prefieres usar IP Pública de Cloud SQL (Reemplaza con tu IP si la usas):
-    db_host = os.environ.get("DB_HOST", "")
+    # IP Pública de tu Cloud SQL o configurada en variables de entorno
+    db_host = os.environ.get("DB_HOST", "34.26.21.37")
     
-    if db_host:
+    if db_host and db_host != "34.26.21.37":
         DATABASE_URL = f"postgresql+psycopg2://{db_user}:{db_pass}@{db_host}:5432/{db_name}"
     else:
-        # OPCIÓN B: Conexión por Socket Unix oficial de Cloud Run
+        # Fallback a socket Unix por si usas la ruta interna
         cloud_sql_connection_name = "epespo:us-east1:epespo-analitica"
         DATABASE_URL = f"postgresql+psycopg2://{db_user}:{db_pass}@/{db_name}?host=/cloudsql/{cloud_sql_connection_name}"
 
-    engine = create_engine(DATABASE_URL)
-    return engine
+    try:
+        engine = create_engine(DATABASE_URL)
+        return engine
+    except Exception as e:
+        st.error(f"Error al crear el motor de base de datos: {e}")
+        st.stop()
 
 
 engine = obtener_motor_y_datos()
 
 
-# FUNCIÓN QUE FALTABA
+# FUNCIÓN DE CARGA CON LA TABLA CORRECTA 'graduados_epespo'
 def cargar_datos_completos():
-    query = "SELECT * FROM registros_epespo"
-    return pd.read_sql(query, con=engine)
+    try:
+        inspector = inspect(engine)
+        if not inspector.has_table("graduados_epespo"):
+            st.error("⚠️ La conexión fue exitosa, pero la tabla 'graduados_epespo' no existe en esta base de datos.")
+            st.stop()
+            
+        query = "SELECT * FROM graduados_epespo"
+        return pd.read_sql(query, con=engine)
+    except Exception as e:
+        st.error(f"Error al consultar la base de datos: {e}")
+        st.stop()
 
 
 # =============================================================
