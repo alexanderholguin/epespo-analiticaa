@@ -36,23 +36,27 @@ if not render_login():
 # =============================================================
 # CONEXIÓN A LA BASE DE DATOS (SOCKET UNIX - CLOUD RUN)
 # =============================================================
+# =============================================================
+# CONEXIÓN A LA BASE DE DATOS (SOLUCIÓN DEFINITIVA SOCKET UNIX)
+# =============================================================
 @st.cache_resource
 def obtener_motor_y_datos():
     db_user = os.environ.get("DB_USER", "postgres")
-    db_pass = os.environ.get("DB_PASS", "epespo2026")
+    # Coloca aquí tu contraseña real de Cloud SQL si no usas variables de entorno
+    db_pass = os.environ.get("DB_PASS", "epespo2026") 
     db_name = os.environ.get("DB_NAME", "epespo-analitica")
     
-    # Definimos la ruta del socket de forma limpia y directa
-    socket_dir = "/cloudsql/epespo:us-east1:epespo-analitica"
+    # Instancia exacta de Cloud SQL vinculada en Cloud Run
+    cloud_sql_connection_name = "epespo:us-east1:epespo-analitica"
     
-    # URL de conexión SQLAlchemy utilizando el parámetro host para el socket Unix
-    DATABASE_URL = f"postgresql+psycopg2://{db_user}:{db_pass}@/{db_name}?host={socket_dir}"
+    # Construcción limpia de la URL de conexión SQLAlchemy para Cloud SQL / PostgreSQL
+    DATABASE_URL = f"postgresql+psycopg2://{db_user}:{db_pass}@/{db_name}?host=/cloudsql/{cloud_sql_connection_name}"
 
     try:
         engine = create_engine(DATABASE_URL)
         return engine
     except Exception as e:
-        st.error(f"Error al crear el motor de base de datos: {e}")
+        st.error(f"Error crítico al conectar con la base de datos: {e}")
         st.stop()
 
 
