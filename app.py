@@ -25,18 +25,19 @@ if not render_login():
 
 
 # =============================================================
-# CONEXIÓN A LA BASE DE DATOS (CLOUD SQL / RENDER)
+# CONEXIÓN A LA BASE DE DATOS (CLOUD SQL / CLOUD RUN)
 # =============================================================
 @st.cache_resource
 def obtener_motor_y_datos():
+    # MODIFICA ESTOS TRES VALORES CON TUS CREDENCIALES REALES DE CLOUD SQL SI ES NECESARIO:
     db_user = os.environ.get("DB_USER", "postgres")
-    db_pass = os.environ.get("DB_PASS", "tu_contrasena")
+    db_pass = os.environ.get("DB_PASS", "epespo2026")
     db_name = os.environ.get("DB_NAME", "epespo_db")
     
     cloud_sql_connection_name = "epespo:us-east1:epespo-analitica"
     
+    # Construcción de la URL de conexión usando el socket Unix oficial de Cloud Run
     DATABASE_URL = os.environ.get("DATABASE_URL")
-    
     if not DATABASE_URL:
         DATABASE_URL = f"postgresql+psycopg2://{db_user}:{db_pass}@/{db_name}?host=/cloudsql/{cloud_sql_connection_name}"
 
