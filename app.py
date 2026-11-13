@@ -28,25 +28,33 @@ if not render_login():
 # =============================================================
 # CONEXIÓN A LA BASE DE DATOS (MÉTODO CREATOR - SOCKET UNIX CLOUD RUN)
 # =============================================================
+# =============================================================
+# CONEXIÓN DEFINITIVA A CLOUD SQL (SOCKET UNIX SEGURO)
+# =============================================================
 @st.cache_resource
 def obtener_motor_y_datos():
-  db_user = "postgres"
-  db_pass = "epespo2026"
-  db_name = "epespo-analisis"
-  cloud_sql_connection_name = "epespo:us-east1:epespo-analitica"
+    db_user = "postgres"
+    db_pass = "epespo2026"
+    db_name = "epespo-analisis"
+    
+    # Dividimos los componentes para garantizar que no haya saltos de línea invisibles
+    project = "epespo"
+    region = "us-east1"
+    instance = "epespo-analitica"
+    
+    # Construcción limpia de la ruta del socket Unix nativa de Google Cloud
+    socket_path = f"/cloudsql/{project}:{region}:{instance}"
 
-  # Conexión directa y robusta con el socket de Cloud SQL utilizando psycopg2
-  engine = create_engine(
-      "postgresql+psycopg2://",
-      creator=lambda: psycopg2.connect(
-          database=db_name,
-          user=db_user,
-          password=db_pass,
-          host=f"/cloudsql/{cloud_sql_connection_name}",
-      ),
-  )
-  return engine
-
+    engine = create_engine(
+        "postgresql+psycopg2://",
+        creator=lambda: psycopg2.connect(
+            database=db_name,
+            user=db_user,
+            password=db_pass,
+            host=socket_path
+        )
+    )
+    return engine
 
 engine = obtener_motor_y_datos()
 
