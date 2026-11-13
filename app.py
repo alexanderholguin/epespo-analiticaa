@@ -29,40 +29,36 @@ if not render_login():
 # =============================================================
 @st.cache_resource
 def obtener_motor_y_datos():
-  DATABASE_URL = os.environ.get("DATABASE_URL") or st.secrets["DATABASE_URL"]
+    db_user = os.environ.get("DB_USER", "postgres")
+    db_pass = os.environ.get("DB_PASS", "tu_contrasena")
+    db_name = os.environ.get("DB_NAME", "epespo_db")
+    
+    cloud_sql_connection_name = "epespo:us-east1:epespo-analitica"
+    
+    DATABASE_URL = os.environ.get("DATABASE_URL")
+    
+    if not DATABASE_URL:
+        DATABASE_URL = f"postgresql+psycopg2://{db_user}:{db_pass}@/{db_name}?host=/cloudsql/{cloud_sql_connection_name}"
 
-  if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace(
-        "postgres://", "postgresql+psycopg2://", 1
-    )
-  elif DATABASE_URL.startswith("postgresql://") and "+psycopg2" not in DATABASE_URL:
-    DATABASE_URL = DATABASE_URL.replace(
-        "postgresql://", "postgresql+psycopg2://", 1
-    )
+    if DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace(
+            "postgres://", "postgresql+psycopg2://", 1
+        )
+    elif DATABASE_URL.startswith("postgresql://") and "+psycopg2" not in DATABASE_URL:
+        DATABASE_URL = DATABASE_URL.replace(
+            "postgresql://", "postgresql+psycopg2://", 1
+        )
 
-  engine = create_engine(DATABASE_URL)
-  inspector = inspect(engine)
-
-  if not inspector.has_table("registros_epespo"):
-    try:
-      archivo_excel = "titulados_epespo.xlsx"
-      df_excel = pd.read_excel(archivo_excel, sheet_name=0)
-      df_excel.to_sql(
-          "registros_epespo", con=engine, if_exists="replace", index=False
-      )
-    except Exception as e:
-      st.error(f"Error al migrar automáticamente el archivo Excel: {e}")
-      st.stop()
-
-  return engine
+    engine = create_engine(DATABASE_URL)
+    return engine
 
 
 engine = obtener_motor_y_datos()
 
 
 def cargar_datos_completos():
-  query = "SELECT * FROM registros_epespo"
-  return pd.read_sql(query, con=engine)
+    query = "SELECT * FROM registros_epespo"
+    return pd.read_sql(query, con=engine)
 
 
 # =============================================================
