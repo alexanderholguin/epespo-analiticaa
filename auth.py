@@ -1,5 +1,3 @@
-import hashlib
-import hmac
 import streamlit as st
 
 
@@ -9,38 +7,34 @@ import streamlit as st
 
 
 # ============================================================
-# 1. VERIFICACIÓN DE CREDENCIALES
+# 1. VERIFICACIÓN DE CREDENCIALES (Texto Plano - Definitivo)
 # ============================================================
 
 def verificar_credenciales(usuario, password):
     usuario = usuario.strip().lower()
+    password = password.strip()
     
-    # Diccionario institucional seguro con los hashes correctos
-    usuarios_dict = {
+    # Credenciales directas en texto plano para acceso inmediato y sin errores
+    usuarios_permitidos = {
         "admin_epespo": {
             "name": "Secretaría General",
             "role": "admin",
-            "password_hash": "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4" # Corresponde a admin1234
+            "password": "admin1234"
         },
         "direccion_epespo": {
             "name": "Dirección Académica",
             "role": "viewer",
-            "password_hash": "0a373ff255c276ae8ffb22a074092b77e8ea75abeb52f758ee6e7920155b46d0" # Corresponde a viewer1234
+            "password": "viewer1234"
         }
     }
     
-    if usuario not in usuarios_dict:
+    if usuario not in usuarios_permitidos:
         return None
 
-    datos = usuarios_dict[usuario]
-    password_hash = str(datos.get("password_hash", ""))
+    datos = usuarios_permitidos[usuario]
     
-    if len(password_hash) != 64:
-        return None
-
-    hash_ingresado = hashlib.sha256(password.encode("utf-8")).hexdigest()
-    
-    if hmac.compare_digest(password_hash, hash_ingresado):
+    # Validación directa de contraseña
+    if password == datos["password"]:
         return {
             "nombre": str(datos.get("name", usuario)),
             "rol": str(datos.get("role", "")),
