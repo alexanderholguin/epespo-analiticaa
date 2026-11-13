@@ -32,7 +32,7 @@ def obtener_motor_y_datos():
     # MODIFICA ESTOS TRES VALORES CON TUS CREDENCIALES REALES DE CLOUD SQL SI ES NECESARIO:
     db_user = os.environ.get("DB_USER", "postgres")
     db_pass = os.environ.get("DB_PASS", "epespo2026")
-    db_name = os.environ.get("DB_NAME", "epespo_db")
+    db_name = os.environ.get("DB_NAME", "epespo_analitica")
     
     cloud_sql_connection_name = "epespo:us-east1:epespo-analitica"
     
