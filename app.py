@@ -27,40 +27,25 @@ if not render_login():
 # =============================================================
 # CONEXIÓN A LA BASE DE DATOS (CLOUD SQL / CLOUD RUN)
 # =============================================================
+import psycopg2
+
+# =============================================================
+# CONEXIÓN A LA BASE DE DATOS (CLOUD SQL VIA TCP)
+# =============================================================
 @st.cache_resource
 def obtener_motor_y_datos():
-    # MODIFICA ESTOS TRES VALORES CON TUS CREDENCIALES REALES DE CLOUD SQL SI ES NECESARIO:
+    # COLOCA AQUÍ TUS DATOS REALES DE CLOUD SQL:
     db_user = os.environ.get("DB_USER", "postgres")
     db_pass = os.environ.get("DB_PASS", "epespo2026")
-    db_name = os.environ.get("DB_NAME", "epespo_analitica")
-    
-    cloud_sql_connection_name = "epespo:us-east1:epespo-analitica"
-    
-    # Construcción de la URL de conexión usando el socket Unix oficial de Cloud Run
-    DATABASE_URL = os.environ.get("DATABASE_URL")
-    if not DATABASE_URL:
-        DATABASE_URL = f"postgresql+psycopg2://{db_user}:{db_pass}@/{db_name}?host=/cloudsql/{cloud_sql_connection_name}"
+    db_name = os.environ.get("DB_NAME", "epespo-analitica")
+    db_host = os.environ.get("DB_HOST", "34.26.21.37") # Ej: 34.xxx.xxx.xxx
+    db_port = os.environ.get("DB_PORT", "5432")
 
-    if DATABASE_URL.startswith("postgres://"):
-        DATABASE_URL = DATABASE_URL.replace(
-            "postgres://", "postgresql+psycopg2://", 1
-        )
-    elif DATABASE_URL.startswith("postgresql://") and "+psycopg2" not in DATABASE_URL:
-        DATABASE_URL = DATABASE_URL.replace(
-            "postgresql://", "postgresql+psycopg2://", 1
-        )
+    # Conexión estándar por TCP segura
+    DATABASE_URL = f"postgresql+psycopg2://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
 
     engine = create_engine(DATABASE_URL)
     return engine
-
-
-engine = obtener_motor_y_datos()
-
-
-def cargar_datos_completos():
-    query = "SELECT * FROM registros_epespo"
-    return pd.read_sql(query, con=engine)
-
 
 # =============================================================
 # ESTILOS CSS GLOBALES INSTITUCIONALES
