@@ -30,17 +30,24 @@ if not render_login():
 # =============================================================
 # CONEXIÓN A LA BASE DE DATOS (CLOUD SQL VIA IP PÚBLICA)
 # =============================================================
+# =============================================================
+# CONEXIÓN A LA BASE DE DATOS (SOCKET UNIX NATIVO - CLOUD RUN)
+# =============================================================
 @st.cache_resource
 def obtener_motor_y_datos():
     db_user = os.environ.get("DB_USER", "postgres")
     db_pass = os.environ.get("DB_PASS", "epespo2026")
     db_name = os.environ.get("DB_NAME", "epespo-analitica")
     
-    # ⚠️ COLOCA AQUÍ TU IP PÚBLICA REAL DE CLOUD SQL ENTRE LAS COMILLAS:
-    db_host = "34.26.21.37" 
+    # Nombre de conexión oficial de Cloud SQL vinculado en Cloud Run
+    cloud_sql_connection_name = "epespo:us-east1:epespo-analitica"
     
-    # Forzamos la conexión por TCP usando la IP pública directamente
-    DATABASE_URL = f"postgresql+psycopg2://{db_user}:{db_pass}@{db_host}:5432/{db_name}"
+    # Sintaxis oficial requerida por psycopg2 para sockets de Cloud SQL en Linux/Cloud Run
+    # Nota: El host debe apuntar a la carpeta /cloudsql/ con la instancia
+    DATABASE_URL = f"postgresql+psycopg2://{db_user}:{db_pass}@/ {db_name}?host=/cloudsql/{cloud_sql_connection_name}"
+    
+    # Limpiamos posibles espacios en la URL del socket
+    DATABASE_URL = DATABASE_URL.replace(" ", "")
 
     try:
         engine = create_engine(DATABASE_URL)
