@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import psycopg2
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.preprocessing import PolynomialFeatures
@@ -25,62 +26,47 @@ if not render_login():
 
 
 # =============================================================
-# CONEXIÓN A LA BASE DE DATOS (CLOUD SQL / CLOUD RUN)
-# =============================================================
-# =============================================================
-# CONEXIÓN A LA BASE DE DATOS (CLOUD SQL VIA IP PÚBLICA)
-# =============================================================
-# =============================================================
-# CONEXIÓN A LA BASE DE DATOS (SOCKET UNIX NATIVO - CLOUD RUN)
-# =============================================================
-# =============================================================
-# CONEXIÓN A LA BASE DE DATOS (SOCKET UNIX - CLOUD RUN)
-# =============================================================
-# =============================================================
-# CONEXIÓN A LA BASE DE DATOS (SOLUCIÓN DEFINITIVA SOCKET UNIX)
-# =============================================================
-@import psycopg2
-
-# =============================================================
-# CONEXIÓN A LA BASE DE DATOS (MÉTODO CREATOR - SOCKET UNIX NATIVO)
+# CONEXIÓN A LA BASE DE DATOS (SOCKET UNIX NATIVO)
 # =============================================================
 @st.cache_resource
 def obtener_motor_y_datos():
-    db_user = os.environ.get("DB_USER", "postgres")
-    # Coloca aquí tu contraseña real de Cloud SQL si no usas variables de entorno
-    db_pass = os.environ.get("DB_PASS", "epespo2026") 
-    db_name = os.environ.get("DB_NAME", "epespo-analitica")
-    
-    # Instancia exacta de Cloud SQL vinculada en Cloud Run
-    cloud_sql_connection_name = "epespo:us-east1:epespo-analitica"
-    
-    # Usamos el conector nativo de psycopg2 mediante 'creator' para evitar errores de sintaxis en SQLAlchemy
-    engine = create_engine(
-        "postgresql+psycopg2://",
-        creator=lambda: psycopg2.connect(
-            database=db_name,
-            user=db_user,
-            password=db_pass,
-            host=f"/cloudsql/{cloud_sql_connection_name}"
-        )
-    )
-    return engine
+  db_user = "postgres"
+  db_pass = "epespo2026"
+  # Asegúrate de que este sea el nombre exacto de tu base de datos en minúsculas
+  db_name = "epespo-analisis"
+  cloud_sql_connection_name = "epespo:us-east1:epespo-analitica"
+
+  engine = create_engine(
+      "postgresql+psycopg2://",
+      creator=lambda: psycopg2.connect(
+          database=db_name,
+          user=db_user,
+          password=db_pass,
+          host=f"/cloudsql/{cloud_sql_connection_name}",
+      ),
+  )
+  return engine
+
 
 engine = obtener_motor_y_datos()
 
-# FUNCIÓN DE CARGA CON LA TABLA CORRECTA 'graduados_epespo'
+
+# FUNCIÓN DE CARGA CON LA TABLA 'graduados_epespo'
 def cargar_datos_completos():
-    try:
-        inspector = inspect(engine)
-        if not inspector.has_table("graduados_epespo"):
-            st.error("⚠️ La conexión fue exitosa, pero la tabla 'graduados_epespo' no existe en esta base de datos.")
-            st.stop()
-            
-        query = "SELECT * FROM graduados_epespo"
-        return pd.read_sql(query, con=engine)
-    except Exception as e:
-        st.error(f"Error al consultar la base de datos: {e}")
-        st.stop()
+  try:
+    inspector = inspect(engine)
+    if not inspector.has_table("graduados_epespo"):
+      st.error(
+          "⚠️ La conexión fue exitosa, pero la tabla 'graduados_epespo' no"
+          " existe en esta base de datos."
+      )
+      st.stop()
+
+    query = "SELECT * FROM graduados_epespo"
+    return pd.read_sql(query, con=engine)
+  except Exception as e:
+    st.error(f"Error al consultar la base de datos: {e}")
+    st.stop()
 
 
 # =============================================================
@@ -245,7 +231,9 @@ def normalizar_curso(curso_raw):
 
 def clasificar_area_operativa(curso):
   nfkd_form = unicodedata.normalize("NFKD", str(curso))
-  c = "".join([char for char in nfkd_form if not unicodedata.combining(char)]).upper()
+  c = "".join(
+      [char for char in nfkd_form if not unicodedata.combining(char)]
+  ).upper()
   if any(k in c for k in ["MAQUINA", "MOTORISTA", "MAQUINISTA", "MECANIC"]):
     return "Área de Máquinas"
   elif any(
@@ -266,7 +254,9 @@ def clasificar_area_operativa(curso):
 
 def clasificar_escala_nautica(curso):
   nfkd_form = unicodedata.normalize("NFKD", str(curso))
-  c = "".join([char for char in nfkd_form if not unicodedata.combining(char)]).upper()
+  c = "".join(
+      [char for char in nfkd_form if not unicodedata.combining(char)]
+  ).upper()
   if any(k in c for k in ["ALTURA", "CAPITAN", "JEFE DE MAQUINAS"]):
     return "4. Mando Superior (Capitanes / Jefes)"
   elif any(
@@ -281,7 +271,9 @@ def clasificar_escala_nautica(curso):
       ]
   ):
     return "3. Mandos Medios y Técnicos"
-  elif any(k in c for k in ["TIMONEL", "MARINERO DE MAQUINAS", "MARINERO PRIMERA"]):
+  elif any(
+      k in c for k in ["TIMONEL", "MARINERO DE MAQUINAS", "MARINERO PRIMERA"]
+  ):
     return "2. Tripulación Calificada"
   return "1. Marinería Base y Artesanal"
 
@@ -618,9 +610,7 @@ with tab4:
       y = df_p["total"]
       model = LinearRegression()
       model.fit(X, y)
-      anios_futuros = np.array(
-          [[2026], [2027], [2028], [2029], [2030]]
-      )
+      anios_futuros = np.array([[2026], [2027], [2028], [2029], [2030]])
       predicciones = model.predict(anios_futuros)
 
       df_futuro = pd.DataFrame(
