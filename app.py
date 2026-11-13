@@ -31,7 +31,7 @@ if not render_login():
 def obtener_motor_y_datos():
     db_user = os.environ.get("DB_USER", "postgres")
     db_pass = os.environ.get("DB_PASS", "epespo2026")
-    db_name = os.environ.get("DB_NAME", "epespo_db")
+    db_name = os.environ.get("DB_NAME", "epespo-analitica")
     
     # OPCIÓN A: Si prefieres usar IP Pública de Cloud SQL (Reemplaza con tu IP si la usas):
     db_host = os.environ.get("DB_HOST", "")
