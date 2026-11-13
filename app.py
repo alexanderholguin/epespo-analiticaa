@@ -39,6 +39,11 @@ if not render_login():
 # =============================================================
 # CONEXIÓN A LA BASE DE DATOS (SOLUCIÓN DEFINITIVA SOCKET UNIX)
 # =============================================================
+@import psycopg2
+
+# =============================================================
+# CONEXIÓN A LA BASE DE DATOS (MÉTODO CREATOR - SOCKET UNIX NATIVO)
+# =============================================================
 @st.cache_resource
 def obtener_motor_y_datos():
     db_user = os.environ.get("DB_USER", "postgres")
@@ -49,16 +54,17 @@ def obtener_motor_y_datos():
     # Instancia exacta de Cloud SQL vinculada en Cloud Run
     cloud_sql_connection_name = "epespo:us-east1:epespo-analitica"
     
-    # Construcción limpia de la URL de conexión SQLAlchemy para Cloud SQL / PostgreSQL
-    DATABASE_URL = f"postgresql+psycopg2://{db_user}:{db_pass}@/{db_name}?host=/cloudsql/{cloud_sql_connection_name}"
-
-    try:
-        engine = create_engine(DATABASE_URL)
-        return engine
-    except Exception as e:
-        st.error(f"Error crítico al conectar con la base de datos: {e}")
-        st.stop()
-
+    # Usamos el conector nativo de psycopg2 mediante 'creator' para evitar errores de sintaxis en SQLAlchemy
+    engine = create_engine(
+        "postgresql+psycopg2://",
+        creator=lambda: psycopg2.connect(
+            database=db_name,
+            user=db_user,
+            password=db_pass,
+            host=f"/cloudsql/{cloud_sql_connection_name}"
+        )
+    )
+    return engine
 
 engine = obtener_motor_y_datos()
 
