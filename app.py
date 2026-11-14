@@ -600,18 +600,22 @@ with tab4:
       df_futuro = pd.DataFrame(
           {"anio": [2026, 2027, 2028, 2029, 2030], "total": predicciones}
       )
-      df_completo_pred = pd.concat([df_p, df_futuro])
 
       fig_pred = px.line(
-          df_completo_pred,
+          df_p,
           x="anio",
           y="total",
           markers=True,
           title="Tendencia Histórica y Proyección a Futuro",
       )
-      fig_pred.update_traces(
-          line=dict(dash="dash", color="red"),
-          selector=dict(x=df_futuro["anio"]),
+      fig_pred.add_trace(
+          go.Scatter(
+              x=[df_p["anio"].iloc[-1], *df_futuro["anio"].tolist()],
+              y=[df_p["total"].iloc[-1], *df_futuro["total"].tolist()],
+              mode="lines+markers",
+              name="Proyección",
+              line=dict(dash="dash", color="red"),
+          )
       )
       st.plotly_chart(fig_pred, use_container_width=True)
       st.success(

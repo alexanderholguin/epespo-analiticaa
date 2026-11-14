@@ -10,6 +10,8 @@ def _get_setting(name: str):
     value = os.environ.get(name)
     if value:
         return value
+    if os.environ.get("K_SERVICE"):
+        return None
     try:
         return st.secrets.get(name)
     except FileNotFoundError:
