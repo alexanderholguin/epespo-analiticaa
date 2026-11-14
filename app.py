@@ -538,7 +538,7 @@ st.markdown(
 # =============================================================
 # PESTAÑAS DE NAVEGACIÓN ANALÍTICA
 # =============================================================
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
     "📈 Evolución Histórica",
     "🗺️ Geografía & Cobertura",
     "⚓ Áreas & Especialidades",
@@ -546,6 +546,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "🎓 Análisis por Curso",
     "🔮 Proyección & Tendencias",
     "🔍 Auditoría de Datos",
+    "🔄 Ciclos y Reingresos",
     "📋 Base de Datos Completa",
 ])
 
@@ -1019,6 +1020,106 @@ with tab7:
     st.info("No hay registros con los filtros seleccionados.")
 
 with tab8:
+  st.subheader("Ciclos de participación y reingresos potenciales")
+  st.caption(
+      "Análisis agregado de registros con DNI en formato de 10 dígitos y año "
+      "válido. Se considera reingreso potencial si vuelve a aparecer tras al "
+      "menos un año calendario sin registros; no confirma reincorporación."
+  )
+  df_ciclos = df_f[
+      (df_f["estado_dni"] == "Con DNI") & (df_f["anio"] > 2000)
+  ].copy()
+  if not df_ciclos.empty:
+    df_anios_por_dni = df_ciclos.groupby("cedula_limpia")["anio"].agg(
+        lambda valores: sorted(set(valores))
+    )
+    df_personas_ciclo = (
+        df_ciclos.groupby("cedula_limpia")
+        .agg(
+            primer_anio=("anio", "min"),
+            ultimo_anio=("anio", "max"),
+            anios_distintos=("anio", "nunique"),
+            cursos=("curso", "nunique"),
+        )
+    )
+    df_personas_ciclo["reingreso_potencial"] = df_anios_por_dni.apply(
+        lambda anios: any(
+            anios[indice] - anios[indice - 1] >= 2
+            for indice in range(1, len(anios))
+        )
+    )
+    ids_multianuales = int((df_personas_ciclo["anios_distintos"] > 1).sum())
+    ids_reingreso = int(df_personas_ciclo["reingreso_potencial"].sum())
+    ids_multicurso = int((df_personas_ciclo["cursos"] > 1).sum())
+
+    col_identificados, col_multianuales, col_reingreso, col_multicurso = (
+        st.columns(4)
+    )
+    col_identificados.metric(
+        "DNI identificados",
+        f"{len(df_personas_ciclo):,}",
+    )
+    col_multianuales.metric(
+        "Registrados en más de un año",
+        f"{ids_multianuales:,}",
+    )
+    col_reingreso.metric(
+        "Reingresos potenciales",
+        f"{ids_reingreso:,}",
+    )
+    col_multicurso.metric(
+        "Registrados en varios cursos",
+        f"{ids_multicurso:,}",
+    )
+
+    col_anual, col_curso_reingreso = st.columns(2)
+    with col_anual:
+      df_personas_anio = (
+          df_ciclos.drop_duplicates(["cedula_limpia", "anio"])
+          .groupby("anio")
+          .size()
+          .reset_index(name="personas")
+      )
+      fig_personas_anio = px.line(
+          df_personas_anio,
+          x="anio",
+          y="personas",
+          markers=True,
+          title="DNI identificados por año (sin duplicar por registro)",
+          labels={"anio": "Año", "personas": "DNI únicos"},
+      )
+      st.plotly_chart(fig_personas_anio, use_container_width=True)
+    with col_curso_reingreso:
+      ids_con_reingreso = df_personas_ciclo.index[
+          df_personas_ciclo["reingreso_potencial"]
+      ]
+      df_cursos_reingreso = (
+          df_ciclos[df_ciclos["cedula_limpia"].isin(ids_con_reingreso)]
+          .groupby("curso")["cedula_limpia"]
+          .nunique()
+          .reset_index(name="dni_identificados")
+          .nlargest(10, "dni_identificados")
+          .sort_values("dni_identificados")
+      )
+      if not df_cursos_reingreso.empty:
+        fig_cursos_reingreso = px.bar(
+            df_cursos_reingreso,
+            x="dni_identificados",
+            y="curso",
+            orientation="h",
+            title="Cursos con más DNI de reingreso potencial",
+            labels={
+                "dni_identificados": "DNI identificados",
+                "curso": "Curso",
+            },
+        )
+        st.plotly_chart(fig_cursos_reingreso, use_container_width=True)
+      else:
+        st.info("No se identificaron intervalos de reingreso potencial.")
+  else:
+    st.info("No hay DNI y años válidos para analizar ciclos.")
+
+with tab9:
   st.subheader("📋 Explorador General de Registros y Base de Datos")
   st.dataframe(
       df_f[[
