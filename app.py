@@ -289,6 +289,49 @@ def limpiar_dni(val):
   return s_digits if s_digits else s
 
 
+def clasificar_dni(val):
+  if pd.isna(val):
+    return "Sin DNI"
+
+  raw = str(val).strip().lower()
+  raw_normalizado = unicodedata.normalize("NFKD", raw)
+  raw_normalizado = "".join(
+      char
+      for char in raw_normalizado
+      if not unicodedata.combining(char)
+  )
+  if raw_normalizado in {
+      "",
+      "nan",
+      "none",
+      "null",
+      "n/a",
+      "na",
+      "s/d",
+      "sin dato",
+      "sin cedula",
+      "no registra",
+      "no registrado",
+  }:
+    return "Sin DNI"
+
+  if raw.endswith(".0") and raw[:-2].isdigit():
+    raw = raw[:-2]
+  digits = "".join(char for char in raw if char.isdigit())
+  if not digits or set(digits) == {"0"}:
+    return "Sin DNI"
+
+  caracteres_no_validos = [
+      char for char in raw if not char.isdigit() and char not in " .-"
+  ]
+  if caracteres_no_validos:
+    return "DNI irregular"
+
+  if len(digits) == 9:
+    digits = "0" + digits
+  return "Con DNI" if len(digits) == 10 else "DNI irregular"
+
+
 def estimar_zona_cantonal(cedula_limpia, prov):
   s = str(cedula_limpia).strip()
   if not s.isdigit() or len(s) < 3:
@@ -331,9 +374,18 @@ if df_raw.empty:
   st.stop()
 
 df_raw["cedula_limpia"] = df_raw["cedula"].apply(limpiar_dni)
+df_raw["estado_dni"] = df_raw["cedula"].apply(clasificar_dni)
 df_raw["curso"] = df_raw["curso"].apply(normalizar_curso)
 df_raw["modalidad"] = df_raw["modalidad"].apply(limpiar_texto_general)
 df_raw["provincia"] = df_raw["provincia"].apply(normalizar_provincia)
+df_raw["es_graduado"] = (
+    df_raw["condicion"]
+    .fillna("")
+    .astype(str)
+    .str.strip()
+    .str.casefold()
+    .eq("graduado")
+)
 
 df_raw["area_operativa"] = df_raw["curso"].apply(clasificar_area_operativa)
 df_raw["escala_nautica"] = df_raw["curso"].apply(clasificar_escala_nautica)
@@ -413,9 +465,12 @@ if mod_sel != "Todas las Modalidades":
   df_f = df_f[df_f["modalidad"] == mod_sel]
 
 if cond_sel == "Solo Graduados (Cumple)":
-  df_f = df_f[df_f["condicion"] == "Graduado"]
+  df_f = df_f[df_f["es_graduado"]]
 elif cond_sel == "No culminó":
-  df_f = df_f[df_f["condicion"] == "No culminó"]
+  df_f = df_f[
+      df_f["condicion"].fillna("").astype(str).str.strip().str.casefold()
+      == "no culminó"
+  ]
 
 if dni_sidebar:
   df_f = df_f[df_f["cedula_limpia"].str.contains(dni_sidebar, na=False)]
@@ -447,7 +502,7 @@ total_titulados = len(df_f)
 provincias_activas = df_f["provincia"].nunique()
 cursos_activos = df_f["curso"].nunique()
 tasa_graduacion = (
-    (len(df_f[df_f["condicion"] == "Graduado"]) / total_titulados * 100)
+    (df_f["es_graduado"].sum() / total_titulados * 100)
     if total_titulados > 0
     else 0
 )
@@ -481,38 +536,42 @@ st.markdown(
 )
 
 # =============================================================
-# PESTAÑAS DE NAVEGACIÓN ANALÍTICA COMPLETAS
+# PESTAÑAS DE NAVEGACIÓN ANALÍTICA
 # =============================================================
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "📈 Evolución Histórica",
     "🗺️ Geografía & Cobertura",
     "⚓ Áreas & Especialidades",
+    "🔥 Demanda & Cumplimiento",
+    "🎓 Análisis por Curso",
     "🔮 Proyección & Tendencias",
     "🔍 Auditoría de Datos",
     "📋 Base de Datos Completa",
 ])
 
 with tab1:
-  st.subheader("Evolución Temporal de Titulaciones (2002 - 2025)")
-  if not df_f.empty and "anio" in df_f.columns:
-    df_anio = (
-        df_f[df_f["anio"] > 2000]
-        .groupby("anio")
+  st.subheader("Evolución anual de registros y resultados")
+  df_evolucion = df_f[df_f["anio"] > 2000]
+  if not df_evolucion.empty:
+    df_evolucion = (
+        df_evolucion.groupby(["anio", "condicion"], dropna=False)
         .size()
-        .reset_index(name="titulados")
+        .reset_index(name="registros")
     )
     fig_line = px.line(
-        df_anio,
+        df_evolucion,
         x="anio",
-        y="titulados",
+        y="registros",
+        color="condicion",
         markers=True,
-        line_shape="spline",
-        color_discrete_sequence=["#0052CC"],
+        title="Registros por año y condición",
     )
     fig_line.update_layout(
         plot_bgcolor="white",
         paper_bgcolor="white",
-        margin=dict(t=20, b=20, l=20, r=20),
+        margin=dict(t=45, b=20, l=20, r=20),
+        xaxis_title="Año",
+        yaxis_title="Registros",
     )
     st.plotly_chart(fig_line, use_container_width=True)
   else:
@@ -579,12 +638,176 @@ with tab3:
       )
       fig_bar.update_layout(yaxis=dict(autorange="reversed"))
       st.plotly_chart(fig_bar, use_container_width=True)
+    df_area_condicion = (
+        df_f.groupby(["area_operativa", "condicion"], dropna=False)
+        .size()
+        .reset_index(name="registros")
+    )
+    fig_area_condicion = px.bar(
+        df_area_condicion,
+        x="area_operativa",
+        y="registros",
+        color="condicion",
+        barmode="stack",
+        title="Resultados por área operativa",
+    )
+    st.plotly_chart(fig_area_condicion, use_container_width=True)
 
 with tab4:
+  st.subheader("Demanda de cursos y tasa de graduación")
+  if not df_f.empty:
+    df_demanda = (
+        df_f.groupby("curso")
+        .agg(
+            total=("curso", "size"),
+            graduados=("es_graduado", "sum"),
+        )
+        .reset_index()
+    )
+    df_demanda["tasa_graduacion"] = (
+        df_demanda["graduados"] / df_demanda["total"] * 100
+    )
+    df_demanda_top = df_demanda.nlargest(15, "total")
+    col_demanda, col_cumplimiento = st.columns(2)
+    with col_demanda:
+      fig_demanda = px.bar(
+          df_demanda_top.sort_values("total"),
+          x="total",
+          y="curso",
+          orientation="h",
+          title="15 cursos con más registros",
+          labels={"total": "Registros", "curso": "Curso"},
+          color="total",
+          color_continuous_scale="Blues",
+      )
+      st.plotly_chart(fig_demanda, use_container_width=True)
+    with col_cumplimiento:
+      fig_cumplimiento = px.bar(
+          df_demanda_top.sort_values("tasa_graduacion"),
+          x="tasa_graduacion",
+          y="curso",
+          orientation="h",
+          title="Graduación por curso (entre los 15 de mayor demanda)",
+          labels={
+              "tasa_graduacion": "Graduados (%)",
+              "curso": "Curso",
+          },
+          range_x=[0, 100],
+          color="tasa_graduacion",
+          color_continuous_scale="Teal",
+      )
+      st.plotly_chart(fig_cumplimiento, use_container_width=True)
+    df_modalidad = (
+        df_f.groupby(["modalidad", "condicion"], dropna=False)
+        .size()
+        .reset_index(name="registros")
+    )
+    fig_modalidad = px.bar(
+        df_modalidad,
+        x="modalidad",
+        y="registros",
+        color="condicion",
+        barmode="group",
+        title="Resultados por modalidad",
+    )
+    st.plotly_chart(fig_modalidad, use_container_width=True)
+    st.caption(
+        "La tasa se calcula como graduados dividido para todos los registros "
+        "del curso; no representa una cohorte si los periodos son distintos."
+    )
+  else:
+    st.info("No hay registros con los filtros seleccionados.")
+
+with tab5:
+  st.subheader("Indicadores y trayectoria del curso seleccionado")
+  cursos_curso = sorted(df_f["curso"].dropna().unique().tolist())
+  if cursos_curso:
+    curso_detalle = st.selectbox(
+        "Selecciona un curso",
+        cursos_curso,
+        key="analisis_curso",
+    )
+    df_curso_detalle = df_f[df_f["curso"] == curso_detalle]
+    cantidad_curso = len(df_curso_detalle)
+    graduados_curso = int(df_curso_detalle["es_graduado"].sum())
+    tasa_curso = (
+        graduados_curso / cantidad_curso * 100 if cantidad_curso else 0
+    )
+    sin_dni_curso = int((df_curso_detalle["estado_dni"] == "Sin DNI").sum())
+    tasa_sin_dni_curso = (
+        sin_dni_curso / cantidad_curso * 100 if cantidad_curso else 0
+    )
+    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+    kpi1.metric("Registros", f"{cantidad_curso:,}")
+    kpi2.metric("Graduados", f"{graduados_curso:,}")
+    kpi3.metric("Tasa de graduación", f"{tasa_curso:.1f}%")
+    kpi4.metric(
+        "Registros sin DNI",
+        f"{sin_dni_curso:,}",
+        f"{tasa_sin_dni_curso:.1f}%",
+    )
+
+    col_historia, col_provincia = st.columns(2)
+    with col_historia:
+      df_historia_curso = (
+          df_curso_detalle[df_curso_detalle["anio"] > 2000]
+          .groupby("anio")
+          .size()
+          .reset_index(name="registros")
+      )
+      if not df_historia_curso.empty:
+        fig_historia_curso = px.line(
+            df_historia_curso,
+            x="anio",
+            y="registros",
+            markers=True,
+            title=f"Evolución anual: {curso_detalle}",
+        )
+        st.plotly_chart(fig_historia_curso, use_container_width=True)
+      else:
+        st.info("No hay años válidos para graficar este curso.")
+    with col_provincia:
+      df_provincia_curso = (
+          df_curso_detalle.groupby("provincia")
+          .size()
+          .reset_index(name="registros")
+          .nlargest(10, "registros")
+      )
+      fig_provincia_curso = px.bar(
+          df_provincia_curso.sort_values("registros"),
+          x="registros",
+          y="provincia",
+          orientation="h",
+          title="Principales provincias",
+      )
+      st.plotly_chart(fig_provincia_curso, use_container_width=True)
+
+    df_modalidad_curso = (
+        df_curso_detalle.groupby(["modalidad", "condicion"], dropna=False)
+        .size()
+        .reset_index(name="registros")
+    )
+    fig_modalidad_curso = px.bar(
+        df_modalidad_curso,
+        x="modalidad",
+        y="registros",
+        color="condicion",
+        barmode="group",
+        title="Resultados por modalidad del curso",
+    )
+    st.plotly_chart(fig_modalidad_curso, use_container_width=True)
+  else:
+    st.info("No hay cursos disponibles con los filtros seleccionados.")
+
+with tab6:
   st.subheader("🔮 Modelo Predictivo y Proyección de Titulaciones")
   if not df_f.empty and "anio" in df_f.columns:
     df_p = (
-        df_f[(df_f["anio"] >= 2010) & (df_f["anio"] <= 2025)]
+        df_f[
+            (df_f["es_graduado"])
+            & (df_f["anio"] >= 2010)
+            & (df_f["anio"] <= 2025)
+        ]
         .groupby("anio")
         .size()
         .reset_index(name="total")
@@ -619,41 +842,183 @@ with tab4:
       )
       st.plotly_chart(fig_pred, use_container_width=True)
       st.success(
-          "El modelo de regresión lineal muestra la tendencia estimada de"
-          " egresados para los próximos años."
+          "Estimación lineal basada en graduados históricos; es una referencia"
+          " y no una garantía de resultados futuros."
       )
     else:
       st.warning(
           "Se requieren más datos históricos para ejecutar la proyección."
       )
 
-with tab5:
-  st.subheader(
-      "Auditoría y Control de Calidad (Registros Anómalos / Sin Cédula)"
+with tab7:
+  st.subheader("Auditoría de DNI y calidad de registros")
+  st.caption(
+      "Los resultados respetan los filtros globales. “Con DNI” indica un "
+      "formato de 10 dígitos; no valida el dígito verificador oficial."
   )
-  mask_anomalo = (
-      df_f["cedula_limpia"].str.contains("000000|nan", case=False, na=True)
-      | (df_f["cedula_limpia"] == "")
-      | (df_f["cedula_limpia"].str.len() < 10)
+  total_auditoria = len(df_f)
+  sin_dni = int((df_f["estado_dni"] == "Sin DNI").sum())
+  dni_irregular = int((df_f["estado_dni"] == "DNI irregular").sum())
+  con_dni = int((df_f["estado_dni"] == "Con DNI").sum())
+  ids_con_varios_registros = int(
+      (
+          df_f.loc[df_f["estado_dni"] == "Con DNI", "cedula_limpia"]
+          .value_counts()
+          > 1
+      ).sum()
   )
-  df_anomalos = df_f[mask_anomalo]
-  st.metric("Registros Históricos con Cédulas Irregulares", len(df_anomalos))
-  if not df_anomalos.empty:
+
+  col_sin_dni, col_irregular, col_con_dni, col_repetidos = st.columns(4)
+  col_sin_dni.metric(
+      "Registros sin DNI",
+      f"{sin_dni:,}",
+      f"{sin_dni / total_auditoria * 100:.1f}%" if total_auditoria else "0%",
+  )
+  col_irregular.metric(
+      "DNI con formato irregular",
+      f"{dni_irregular:,}",
+      (
+          f"{dni_irregular / total_auditoria * 100:.1f}%"
+          if total_auditoria
+          else "0%"
+      ),
+  )
+  col_con_dni.metric("Formato de DNI completo", f"{con_dni:,}")
+  col_repetidos.metric("DNI en varios registros", f"{ids_con_varios_registros:,}")
+  st.caption(
+      "Un DNI asociado a varios registros puede corresponder a varios cursos "
+      "o reingresos; no implica por sí solo un duplicado. Los conteos son de "
+      "registros y no de personas únicas cuando falta el DNI."
+  )
+
+  if not df_f.empty:
+    df_auditoria_curso = (
+        df_f.groupby("curso")
+        .agg(
+            total=("estado_dni", "size"),
+            sin_dni=("estado_dni", lambda valores: (valores == "Sin DNI").sum()),
+            irregulares=(
+                "estado_dni",
+                lambda valores: (valores == "DNI irregular").sum(),
+            ),
+            con_dni=("estado_dni", lambda valores: (valores == "Con DNI").sum()),
+        )
+        .reset_index()
+    )
+    df_auditoria_curso["sin_dni_pct"] = (
+        df_auditoria_curso["sin_dni"] / df_auditoria_curso["total"] * 100
+    )
+    df_auditoria_curso["irregulares_pct"] = (
+        df_auditoria_curso["irregulares"] / df_auditoria_curso["total"] * 100
+    )
+    df_auditoria_curso["alertas"] = (
+        df_auditoria_curso["sin_dni"] + df_auditoria_curso["irregulares"]
+    )
+
+    col_auditoria_cursos, col_tendencia_dni = st.columns(2)
+    with col_auditoria_cursos:
+      df_alertas_top = df_auditoria_curso.nlargest(15, "alertas")
+      df_alertas_grafico = df_alertas_top.melt(
+          id_vars="curso",
+          value_vars=["sin_dni", "irregulares"],
+          var_name="tipo",
+          value_name="registros",
+      )
+      df_alertas_grafico["tipo"] = df_alertas_grafico["tipo"].map({
+          "sin_dni": "Sin DNI",
+          "irregulares": "DNI irregular",
+      })
+      fig_auditoria_cursos = px.bar(
+          df_alertas_grafico,
+          x="registros",
+          y="curso",
+          color="tipo",
+          barmode="stack",
+          orientation="h",
+          title="Registros por revisar en los 15 cursos con más alertas",
+      )
+      fig_auditoria_cursos.update_layout(yaxis=dict(autorange="reversed"))
+      st.plotly_chart(fig_auditoria_cursos, use_container_width=True)
+    with col_tendencia_dni:
+      df_tendencia_dni = df_f[df_f["anio"] > 2000]
+      if not df_tendencia_dni.empty:
+        df_tendencia_dni = (
+            df_tendencia_dni.groupby(["anio", "estado_dni"])
+            .size()
+            .unstack(fill_value=0)
+        )
+        for categoria in ["Sin DNI", "DNI irregular", "Con DNI"]:
+          if categoria not in df_tendencia_dni.columns:
+            df_tendencia_dni[categoria] = 0
+        df_tendencia_dni["total"] = df_tendencia_dni[
+            ["Sin DNI", "DNI irregular", "Con DNI"]
+        ].sum(axis=1)
+        df_tendencia_dni["sin_dni_pct"] = (
+            df_tendencia_dni["Sin DNI"] / df_tendencia_dni["total"] * 100
+        )
+        df_tendencia_dni["irregular_pct"] = (
+            df_tendencia_dni["DNI irregular"]
+            / df_tendencia_dni["total"]
+            * 100
+        )
+        df_tendencia_dni = (
+            df_tendencia_dni[["sin_dni_pct", "irregular_pct"]]
+            .reset_index()
+            .melt(
+                id_vars="anio",
+                var_name="tipo",
+                value_name="porcentaje",
+            )
+        )
+        df_tendencia_dni["tipo"] = df_tendencia_dni["tipo"].map({
+            "sin_dni_pct": "Sin DNI",
+            "irregular_pct": "DNI irregular",
+        })
+        fig_tendencia_dni = px.line(
+            df_tendencia_dni,
+            x="anio",
+            y="porcentaje",
+            color="tipo",
+            markers=True,
+            title="Porcentaje de alertas de DNI por año",
+            labels={"anio": "Año", "porcentaje": "Registros (%)"},
+        )
+        fig_tendencia_dni.update_layout(yaxis_range=[0, 100])
+        st.plotly_chart(fig_tendencia_dni, use_container_width=True)
+      else:
+        st.info("No hay años válidos para mostrar la tendencia de DNI.")
+
+    df_auditoria_tabla = df_auditoria_curso.rename(columns={
+        "curso": "Curso",
+        "total": "Registros",
+        "sin_dni": "Sin DNI",
+        "sin_dni_pct": "Sin DNI (%)",
+        "irregulares": "DNI irregular",
+        "irregulares_pct": "Irregular (%)",
+        "con_dni": "Con DNI",
+        "alertas": "Total por revisar",
+    })
+    st.markdown("#### Resumen de auditoría por curso")
     st.dataframe(
-        df_anomalos[[
-            "cedula",
-            "nombres",
-            "provincia",
-            "curso",
-            "anio",
-            "condicion",
+        df_auditoria_tabla.sort_values(
+            "Total por revisar",
+            ascending=False,
+        )[[
+            "Curso",
+            "Registros",
+            "Sin DNI",
+            "Sin DNI (%)",
+            "DNI irregular",
+            "Irregular (%)",
+            "Con DNI",
         ]],
         use_container_width=True,
+        hide_index=True,
     )
   else:
-    st.success("¡Excelente calidad de datos! No se detectan anomalías graves.")
+    st.info("No hay registros con los filtros seleccionados.")
 
-with tab6:
+with tab8:
   st.subheader("📋 Explorador General de Registros y Base de Datos")
   st.dataframe(
       df_f[[
