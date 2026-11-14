@@ -1,10 +1,66 @@
+import os
+
 import streamlit as st
 import pandas as pd
-from sqlalchemy import create_engine, text
+import psycopg2
+from sqlalchemy import create_engine
+
+
+def _get_setting(name: str):
+    value = os.environ.get(name)
+    if value:
+        return value
+    try:
+        return st.secrets.get(name)
+    except FileNotFoundError:
+        return None
+
 
 @st.cache_resource
 def get_engine():
-    return create_engine(st.secrets["DATABASE_URL"], pool_pre_ping=True)
+    database_url = _get_setting("DATABASE_URL")
+    if database_url:
+        return create_engine(database_url, pool_pre_ping=True)
+
+    connection_name = _get_setting("INSTANCE_CONNECTION_NAME")
+    db_name = _get_setting("DB_NAME")
+    db_user = _get_setting("DB_USER")
+    db_password = _get_setting("DB_PASSWORD")
+    missing = [
+        name
+        for name, value in (
+            ("INSTANCE_CONNECTION_NAME", connection_name),
+            ("DB_NAME", db_name),
+            ("DB_USER", db_user),
+            ("DB_PASSWORD", db_password),
+        )
+        if not value
+    ]
+    if missing:
+        raise RuntimeError(
+            "Falta configurar DATABASE_URL o estas variables: "
+            + ", ".join(missing)
+        )
+
+    if len(connection_name.split(":")) != 3 or not all(
+        connection_name.split(":")
+    ):
+        raise ValueError(
+            "INSTANCE_CONNECTION_NAME debe tener el formato "
+            "proyecto:región:instancia."
+        )
+
+    socket_path = f"/cloudsql/{connection_name}"
+    return create_engine(
+        "postgresql+psycopg2://",
+        creator=lambda: psycopg2.connect(
+            database=db_name,
+            user=db_user,
+            password=db_password,
+            host=socket_path,
+        ),
+        pool_pre_ping=True,
+    )
 
 @st.cache_data(ttl=600)
 def cargar_datos_completos() -> pd.DataFrame:

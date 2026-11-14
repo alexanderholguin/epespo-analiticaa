@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar todo el código y la carpeta .streamlit con los secretos
+# Copiar el código; las credenciales se configuran fuera de la imagen
 COPY . .
 
 # Exponer el puerto predeterminado que exige Cloud Run

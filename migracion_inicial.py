@@ -1,9 +1,7 @@
 import pandas as pd
-import streamlit as st
-from sqlalchemy import create_engine
+from db import get_engine
 
 # La URL de la base de datos se configura fuera del repositorio.
-DATABASE_URL = st.secrets["DATABASE_URL"]
 EXCEL_FILE = "titulados_epespo.xlsx"
 
 print("📂 Leyendo hoja consolidada del Excel...")
@@ -167,7 +165,7 @@ df_final = df_final[df_final["anio"] >= 2002]
 print(f"📊 Registros preparados: {len(df_final):,}")
 print("🚀 Cargando en PostgreSQL...")
 
-engine = create_engine(DATABASE_URL)
+engine = get_engine()
 df_final.to_sql(
     "graduados_epespo",
     con=engine,

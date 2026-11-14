@@ -4,15 +4,15 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import psycopg2
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.preprocessing import PolynomialFeatures
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import inspect
 import streamlit as st
 import unicodedata
 
 from auth import render_login, cerrar_sesion
+from db import get_engine
 
 st.set_page_config(
     page_title="EPESPO - Suite Analítica y Estratégica Marítima",
@@ -26,37 +26,13 @@ if not render_login():
 
 
 # =============================================================
-# CONEXIÓN A LA BASE DE DATOS (MÉTODO CREATOR - SOCKET UNIX CLOUD RUN)
+# CONEXIÓN A CLOUD SQL
 # =============================================================
-# =============================================================
-# CONEXIÓN DEFINITIVA A CLOUD SQL (SOCKET UNIX SEGURO)
-# =============================================================
-@st.cache_resource
-def obtener_motor_y_datos():
-    db_user = "postgres"
-    db_pass = "epespo2026"
-    db_name = "epespo-analisis"
-    
-    # Dividimos los componentes para garantizar que no haya saltos de línea invisibles
-    project = "epespo"
-    region = "us-east1"
-    instance = "epespo-analitica"
-    
-    # Construcción limpia de la ruta del socket Unix nativa de Google Cloud
-    socket_path = f"/cloudsql/{project}:{region}:{instance}"
-
-    engine = create_engine(
-        "postgresql+psycopg2://",
-        creator=lambda: psycopg2.connect(
-            database=db_name,
-            user=db_user,
-            password=db_pass,
-            host=socket_path
-        )
-    )
-    return engine
-
-engine = obtener_motor_y_datos()
+try:
+  engine = get_engine()
+except (RuntimeError, ValueError) as e:
+  st.error(f"Configuración de Cloud SQL inválida: {e}")
+  st.stop()
 
 
 # FUNCIÓN DE CARGA CON LA TABLA 'graduados_epespo'
