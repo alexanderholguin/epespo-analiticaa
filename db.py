@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 import os
 
 import streamlit as st
@@ -225,3 +227,96 @@ def _valor_sql(valor):
     if hasattr(valor, "item"):
         return valor.item()
     return valor
+
+
+def _hash_token_sesion(token: str) -> str:
+    if not token:
+        raise ValueError("El token de sesión no puede estar vacío.")
+    return sha256(token.encode("utf-8")).hexdigest()
+
+
+def _asegurar_tabla_sesiones(connection) -> None:
+    connection.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS epespo_auth_sessions (
+                token_hash VARCHAR(64) PRIMARY KEY,
+                usuario VARCHAR(128) NOT NULL,
+                expira_en TIMESTAMP WITH TIME ZONE NOT NULL,
+                creado_en TIMESTAMP WITH TIME ZONE NOT NULL
+                    DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+    )
+
+
+def guardar_sesion_autenticacion(
+    token: str,
+    usuario: str,
+    duracion_segundos: int,
+) -> float:
+    if duracion_segundos <= 0:
+        raise ValueError("La duración de la sesión debe ser positiva.")
+
+    expira_en = datetime.now(timezone.utc) + timedelta(
+        seconds=duracion_segundos
+    )
+    parametros = {
+        "token_hash": _hash_token_sesion(token),
+        "usuario": usuario,
+        "expira_en": expira_en,
+    }
+    with get_engine().begin() as connection:
+        _asegurar_tabla_sesiones(connection)
+        connection.execute(
+            text(
+                "DELETE FROM epespo_auth_sessions "
+                "WHERE expira_en <= CURRENT_TIMESTAMP"
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO epespo_auth_sessions
+                    (token_hash, usuario, expira_en)
+                VALUES (:token_hash, :usuario, :expira_en)
+                """
+            ),
+            parametros,
+        )
+    return expira_en.timestamp()
+
+
+def obtener_sesion_autenticacion(token: str):
+    token_hash = _hash_token_sesion(token)
+    with get_engine().begin() as connection:
+        _asegurar_tabla_sesiones(connection)
+        sesion = connection.execute(
+            text(
+                """
+                SELECT usuario, expira_en
+                FROM epespo_auth_sessions
+                WHERE token_hash = :token_hash
+                  AND expira_en > CURRENT_TIMESTAMP
+                """
+            ),
+            {"token_hash": token_hash},
+        ).mappings().one_or_none()
+
+    if sesion is None:
+        return None
+    return sesion["usuario"], sesion["expira_en"].timestamp()
+
+
+def revocar_sesion_autenticacion(token: str) -> None:
+    token_hash = _hash_token_sesion(token)
+    with get_engine().begin() as connection:
+        _asegurar_tabla_sesiones(connection)
+        connection.execute(
+            text(
+                "DELETE FROM epespo_auth_sessions "
+                "WHERE token_hash = :token_hash"
+            ),
+            {"token_hash": token_hash},
+        )
