@@ -1060,9 +1060,9 @@ st.markdown(
 )
 
 # =============================================================
-# PESTAÑAS DE NAVEGACIÓN ANALÍTICA
+# PESTAÑAS DE NAVEGACIÓN ANALÍTICA (CON LA NUEVA SECCIÓN)
 # =============================================================
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
     "📈 Evolución Histórica",
     "🗺️ Geografía & Cobertura",
     "⚓ Áreas & Especialidades",
@@ -1072,6 +1072,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
     "🔍 Auditoría de Datos",
     "🔄 Ciclos y Reingresos",
     "📋 Base de Datos Completa",
+    "⚓ Escalafón y Ascensos",
 ])
 
 with tab1:
@@ -1159,13 +1160,14 @@ with tab2:
           x="cantidad",
           y="provincia",
           orientation="h",
-          color="cantidad",
-          color_continuous_scale="Blues",
           text="cantidad",
           custom_data=["porcentaje"],
           title="Registros por provincia",
       )
       fig_map.update_traces(
+          marker_color="#0284C7",
+          marker_line_color="#0A2540",
+          marker_line_width=1,
           texttemplate="%{x:,.0f}",
           textposition="outside",
           cliponaxis=False,
@@ -1177,9 +1179,8 @@ with tab2:
       fig_map.update_layout(
           plot_bgcolor="white",
           paper_bgcolor="white",
-          height=max(420, len(df_prov) * 32),
-          margin=dict(t=55, b=35, l=20, r=55),
-          coloraxis_showscale=False,
+          height=max(450, len(df_prov) * 35),
+          margin=dict(t=55, b=35, l=20, r=80),
           xaxis_title="Cantidad de registros",
           yaxis_title="",
       )
@@ -1651,57 +1652,6 @@ with tab7:
         "«Toda la base de datos» para ver los gráficos."
     )
 
-  st.markdown("#### 📥 Descarga de Registros por Rango de Años y Mes")
-  st.caption("Filtra por periodo específico para mantener las descargas ligeras y rápidas.")
-
-  anios_disponibles = sorted([int(a) for a in df_raw["anio"].dropna().unique() if a > 2000])
-  if anios_disponibles:
-    col_ini, col_fin, col_mes = st.columns(3)
-    with col_ini:
-      anio_desde = st.selectbox("Año inicial:", anios_disponibles, index=0, key="auditoria_anio_desde")
-    with col_fin:
-      anio_hasta = st.selectbox("Año final:", anios_disponibles, index=len(anios_disponibles)-1, key="auditoria_anio_hasta")
-    with col_mes:
-      opciones_meses_descarga = ["Todos los meses"] + list(NOMBRES_MESES.keys())
-      mes_sel_descarga = st.selectbox(
-          "Mes:",
-          opciones_meses_descarga,
-          format_func=lambda valor: "Todos" if valor == "Todos los meses" else NOMBRES_MESES.get(valor, str(valor)),
-          key="auditoria_mes_descarga"
-      )
-    
-    df_base_filtrado = df_raw[df_raw["anio"].between(anio_desde, anio_hasta)].copy()
-    if mes_sel_descarga != "Todos los meses":
-      df_base_filtrado = df_base_filtrado[df_base_filtrado["mes"] == mes_sel_descarga]
-      etiqueta_periodo = f"{anio_desde} - {anio_hasta} ({NOMBRES_MESES.get(mes_sel_descarga)})"
-    else:
-      etiqueta_periodo = f"{anio_desde} - {anio_hasta} (Todos los meses)"
-  else:
-    df_base_filtrado = df_raw.copy()
-    etiqueta_periodo = "Histórico completo"
-
-  df_todos_export = df_base_filtrado.copy()
-  df_sin_dni_export = df_base_filtrado[df_base_filtrado["estado_dni"] == "Sin DNI"].copy()
-  df_completos_export = df_base_filtrado[mascara_informacion_completa(df_base_filtrado)].copy()
-
-  opciones_descarga_bruta = {
-      "todos": (f"Todos los registros [{etiqueta_periodo}]", df_todos_export),
-      "sin_dni": (f"Registros sin DNI [{etiqueta_periodo}]", df_sin_dni_export),
-      "completos": (f"DNI e info completa [{etiqueta_periodo}]", df_completos_export),
-  }
-
-  opciones_descarga = {
-      clave: (
-          titulo,
-          df_original.loc[datos.index].assign(
-              cedula_limpia=datos["cedula_limpia"],
-              estado_dni=datos["estado_dni"],
-          ) if not datos.empty else pd.DataFrame(columns=df_original.columns)
-      )
-      for clave, (titulo, datos) in opciones_descarga_bruta.items()
-  }
-  mostrar_botones_descarga_auditoria(opciones_descarga)
-
   st.markdown("#### Distribución del estado del DNI")
   df_estado_dni = (
       df_auditoria["estado_dni"]
@@ -1859,6 +1809,59 @@ with tab7:
   else:
     st.info("No hay registros con los filtros seleccionados.")
 
+  # Bloque de Descargas al final de la auditoría
+  st.markdown("---")
+  st.markdown("#### 📥 Descarga de Registros por Rango de Años y Mes")
+  st.caption("Filtra por periodo específico para mantener las descargas ligeras y rápidas.")
+
+  anios_disponibles = sorted([int(a) for a in df_raw["anio"].dropna().unique() if a > 2000])
+  if anios_disponibles:
+    col_ini, col_fin, col_mes = st.columns(3)
+    with col_ini:
+      anio_desde = st.selectbox("Año inicial:", anios_disponibles, index=0, key="auditoria_anio_desde")
+    with col_fin:
+      anio_hasta = st.selectbox("Año final:", anios_disponibles, index=len(anios_disponibles)-1, key="auditoria_anio_hasta")
+    with col_mes:
+      opciones_meses_descarga = ["Todos los meses"] + list(NOMBRES_MESES.keys())
+      mes_sel_descarga = st.selectbox(
+          "Mes:",
+          opciones_meses_descarga,
+          format_func=lambda valor: "Todos" if valor == "Todos los meses" else NOMBRES_MESES.get(valor, str(valor)),
+          key="auditoria_mes_descarga"
+      )
+    
+    df_base_filtrado = df_raw[df_raw["anio"].between(anio_desde, anio_hasta)].copy()
+    if mes_sel_descarga != "Todos los meses":
+      df_base_filtrado = df_base_filtrado[df_base_filtrado["mes"] == mes_sel_descarga]
+      etiqueta_periodo = f"{anio_desde} - {anio_hasta} ({NOMBRES_MESES.get(mes_sel_descarga)})"
+    else:
+      etiqueta_periodo = f"{anio_desde} - {anio_hasta} (Todos los meses)"
+  else:
+    df_base_filtrado = df_raw.copy()
+    etiqueta_periodo = "Histórico completo"
+
+  df_todos_export = df_base_filtrado.copy()
+  df_sin_dni_export = df_base_filtrado[df_base_filtrado["estado_dni"] == "Sin DNI"].copy()
+  df_completos_export = df_base_filtrado[mascara_informacion_completa(df_base_filtrado)].copy()
+
+  opciones_descarga_bruta = {
+      "todos": (f"Todos los registros [{etiqueta_periodo}]", df_todos_export),
+      "sin_dni": (f"Registros sin DNI [{etiqueta_periodo}]", df_sin_dni_export),
+      "completos": (f"DNI e info completa [{etiqueta_periodo}]", df_completos_export),
+  }
+
+  opciones_descarga = {
+      clave: (
+          titulo,
+          df_original.loc[datos.index].assign(
+              cedula_limpia=datos["cedula_limpia"],
+              estado_dni=datos["estado_dni"],
+          ) if not datos.empty else pd.DataFrame(columns=df_original.columns)
+      )
+      for clave, (titulo, datos) in opciones_descarga_bruta.items()
+  }
+  mostrar_botones_descarga_auditoria(opciones_descarga)
+
 with tab8:
   st.subheader("Ciclos de participación y reingresos potenciales")
   st.caption(
@@ -1973,3 +1976,58 @@ with tab9:
       ]],
       use_container_width=True,
   )
+
+with tab10:
+  st.subheader("⚓ Simulador de Carrera y Elegibilidad de Ascensos Marítimos")
+  st.markdown(
+      "Este módulo evalúa la trayectoria profesional de los tripulantes según la normativa oficial de tiempos de experiencia:"
+  )
+  st.info(
+      "📌 **Reglas de Ascenso:**\n"
+      "1. **Marinero Pescador ➡️ Marinero 1ra de Puente:** Mínimo 2 años.\n"
+      "2. **Marinero 1ra de Puente ➡️ Patrón Costanero:** Mínimo 2 años.\n"
+      "3. **Patrón Costanero ➡️ Patrón de Altura:** Mínimo 3 años.\n"
+      "4. **Patrón de Altura ➡️ Capitán:** Mínimo 3 años."
+  )
+
+  # Filtro por DNI para buscar la trayectoria individual de un marino
+  df_con_dni_valido = df_raw[df_raw["estado_dni"] == "Con DNI"].copy()
+  if not df_con_dni_valido.empty:
+    cedulas_disponibles = sorted(df_con_dni_valido["cedula_limpia"].unique().tolist())
+    dni_seleccionado = st.selectbox(
+        "Seleccione o busque el DNI del Marino para auditar su escalafón:",
+        options=cedulas_disponibles,
+        key="simulador_dni_select"
+    )
+
+    if dni_seleccionado:
+      df_marino = df_con_dni_valido[df_con_dni_valido["cedula_limpia"] == dni_seleccionado].sort_values("anio")
+      nombre_marino = df_marino["nombres"].iloc[0] if not df_marino["nombres"].empty else "Sin nombre registrado"
+
+      st.markdown(f"### Expediente del Marino: **{nombre_marino}** (Cédula: {dni_seleccionado})")
+      
+      # Mostrar tabla con los cursos y años registrados por el marino
+      st.dataframe(
+          df_marino[["curso", "anio", "mes", "condicion", "provincia", "modalidad"]],
+          use_container_width=True,
+          hide_index=True
+      )
+
+      # Lógica de evaluación de tiempos entre titulaciones
+      anios_titulacion = df_marino["anio"].tolist()
+      cursos_titulacion = df_marino["curso"].tolist()
+
+      st.markdown("#### ⏱️ Análisis de Tiempos y Elegibilidad de Ascenso")
+      if len(anios_titulacion) > 1:
+        for i in range(1, len(anios_titulacion)):
+          curso_previo = cursos_titulacion[i-1]
+          anio_previo = anios_titulacion[i-1]
+          curso_actual = cursos_titulacion[i]
+          anio_actual = anios_titulacion[i]
+          diferencia_anios = anio_actual - anio_previo
+
+          st.write(f"• De **{curso_previo}** ({anio_previo}) a **{curso_actual}** ({anio_actual}): **{diferencia_anios} año(s) de diferencia**.")
+      else:
+        st.warning("El marino cuenta con un solo registro histórico en la base de datos. Se requiere registrar su progresión en múltiples niveles para calcular los intervalos de ascenso.")
+  else:
+    st.info("No se encontraron registros con DNI válido para procesar el simulador de escalafón.")
