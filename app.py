@@ -48,8 +48,38 @@ def cargar_datos_completos():
       )
       st.stop()
 
-    query = "SELECT * FROM graduados_epespo"
-    return pd.read_sql(query, con=engine)
+    query = """
+        WITH registros AS (
+            SELECT
+                graduados_epespo.*,
+                regexp_replace(
+                    translate(
+                        lower(COALESCE(modalidad::text, '')),
+                        'áéíóúü',
+                        'aeiouu'
+                    ),
+                    '[^a-z0-9]',
+                    '',
+                    'g'
+                ) AS modalidad_clave_analitica
+            FROM graduados_epespo
+        )
+        SELECT
+            registros.*,
+            CASE
+                WHEN modalidad_clave_analitica IN (
+                    'eld',
+                    'estudiolibredirigido'
+                )
+                    THEN 'Estudio Libre Dirigido'
+                WHEN modalidad_clave_analitica = 'nivelacion'
+                    THEN 'Nivelación'
+                ELSE NULLIF(BTRIM(registros.modalidad::text), '')
+            END AS modalidad_analitica
+        FROM registros
+    """
+    df = pd.read_sql(query, con=engine)
+    return df.drop(columns=["modalidad_clave_analitica"])
   except Exception as e:
     st.error(f"Error al consultar la base de datos: {e}")
     st.stop()
@@ -301,6 +331,58 @@ def texto_fecha(valor):
   return "" if pd.isna(fecha) else fecha.strftime("%Y-%m-%d")
 
 
+def filtrar_por_periodo(df, clave):
+  anios = sorted(
+      int(anio)
+      for anio in df["anio"].dropna().unique()
+      if int(anio) > 2000
+  )
+  opciones_anio = ["Todos"] + anios
+  clave_anio = f"{clave}_anio"
+  if st.session_state.get(clave_anio, "Todos") not in opciones_anio:
+    st.session_state[clave_anio] = "Todos"
+  with st.container():
+    col_anio, col_mes = st.columns(2)
+    with col_anio:
+      anio_sel = st.selectbox(
+          "Año",
+          opciones_anio,
+          format_func=lambda valor: (
+              "Todos los años" if valor == "Todos" else str(valor)
+          ),
+          key=clave_anio,
+      )
+
+    df_anio = (
+        df if anio_sel == "Todos" else df[df["anio"] == anio_sel]
+    )
+    meses = sorted(
+        int(mes)
+        for mes in df_anio["mes"].dropna().unique()
+        if 1 <= int(mes) <= 12
+    )
+    opciones_mes = ["Todos"] + meses
+    clave_mes = f"{clave}_mes"
+    if st.session_state.get(clave_mes, "Todos") not in opciones_mes:
+      st.session_state[clave_mes] = "Todos"
+    with col_mes:
+      mes_sel = st.selectbox(
+          "Mes",
+          opciones_mes,
+          format_func=lambda valor: (
+              "Todos los meses"
+              if valor == "Todos"
+              else NOMBRES_MESES.get(valor, str(valor))
+          ),
+          key=clave_mes,
+      )
+
+  df_filtrado = df_anio
+  if mes_sel != "Todos":
+    df_filtrado = df_filtrado[df_filtrado["mes"] == mes_sel]
+  return df_filtrado, anio_sel, mes_sel
+
+
 def convertir_entero_formulario(valor, campo):
   if not valor.strip():
     return None
@@ -403,7 +485,9 @@ if df_raw.empty:
   st.error("No se encontraron registros en la base de datos.")
   st.stop()
 
-df_original = df_raw.copy()
+df_original = df_raw.drop(columns=["modalidad_analitica"]).copy()
+df_raw["modalidad"] = df_raw["modalidad_analitica"].fillna(df_raw["modalidad"])
+df_raw.drop(columns=["modalidad_analitica"], inplace=True)
 df_raw["cedula_limpia"] = df_raw["cedula"].apply(limpiar_dni)
 df_raw["estado_dni"] = df_raw["cedula"].apply(clasificar_dni)
 df_raw["curso"] = df_raw["curso"].apply(normalizar_curso)
@@ -428,9 +512,7 @@ df_raw["tipo_tramite"] = df_raw.apply(clasificar_tipo_estudiante, axis=1)
 df_raw["anio"] = (
     pd.to_numeric(df_raw["anio"], errors="coerce").fillna(0).astype(int)
 )
-df_raw["mes"] = (
-    pd.to_numeric(df_raw["mes"], errors="coerce").fillna(1).astype(int)
-)
+df_raw["mes"] = pd.to_numeric(df_raw["mes"], errors="coerce")
 
 
 # =============================================================
@@ -870,27 +952,64 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
 
 with tab1:
   st.subheader("Evolución anual de registros y resultados")
-  df_evolucion = df_f[df_f["anio"] > 2000]
+  df_evolucion, anio_evolucion, mes_evolucion = filtrar_por_periodo(
+      df_f, "evolucion"
+  )
+  df_evolucion = df_evolucion[df_evolucion["anio"] > 2000].copy()
   if not df_evolucion.empty:
-    df_evolucion = (
-        df_evolucion.groupby(["anio", "condicion"], dropna=False)
-        .size()
-        .reset_index(name="registros")
-    )
-    fig_line = px.line(
-        df_evolucion,
-        x="anio",
-        y="registros",
-        color="condicion",
-        markers=True,
-        title="Registros por año y condición",
-    )
+    if anio_evolucion != "Todos" and mes_evolucion == "Todos":
+      df_evolucion["periodo"] = df_evolucion["mes"].map(
+          lambda mes: (
+              NOMBRES_MESES.get(int(mes), "Mes no registrado")
+              if pd.notna(mes)
+              else "Mes no registrado"
+          )
+      )
+      df_evolucion = (
+          df_evolucion.groupby(["periodo", "condicion"], dropna=False)
+          .size()
+          .reset_index(name="registros")
+      )
+      fig_line = px.line(
+          df_evolucion,
+          x="periodo",
+          y="registros",
+          color="condicion",
+          markers=True,
+          category_orders={
+              "periodo": list(NOMBRES_MESES.values()) + ["Mes no registrado"]
+          },
+          title=f"Registros mensuales de {anio_evolucion} por condición",
+      )
+      fig_line.update_xaxes(title_text="Mes")
+    else:
+      df_evolucion = (
+          df_evolucion.groupby(["anio", "condicion"], dropna=False)
+          .size()
+          .reset_index(name="registros")
+      )
+      fig_line = px.line(
+          df_evolucion,
+          x="anio",
+          y="registros",
+          color="condicion",
+          markers=True,
+          title=(
+              f"Registros por año y condición"
+              + (
+                  f" · {NOMBRES_MESES[mes_evolucion]}"
+                  if mes_evolucion != "Todos"
+                  else ""
+              )
+          ),
+      )
+      fig_line.update_xaxes(title_text="Año")
     fig_line.update_layout(
         plot_bgcolor="white",
         paper_bgcolor="white",
         margin=dict(t=45, b=20, l=20, r=20),
-        xaxis_title="Año",
         yaxis_title="Registros",
+        hovermode="x unified",
     )
     st.plotly_chart(fig_line, use_container_width=True)
   else:
@@ -898,23 +1017,49 @@ with tab1:
 
 with tab2:
   st.subheader("Distribución Geográfica y Provincial")
-  if not df_f.empty and "provincia" in df_f.columns:
+  df_cobertura, _, _ = filtrar_por_periodo(df_f, "cobertura")
+  if not df_cobertura.empty and "provincia" in df_cobertura.columns:
     col_m1, col_m2 = st.columns([2, 1])
     with col_m1:
-      df_prov = df_f.groupby("provincia").size().reset_index(name="cantidad")
+      df_prov = (
+          df_cobertura.groupby("provincia")
+          .size()
+          .reset_index(name="cantidad")
+      )
+      df_prov["porcentaje"] = (
+          df_prov["cantidad"] / df_prov["cantidad"].sum() * 100
+      )
+      df_prov = df_prov.sort_values("cantidad", ascending=True)
       fig_map = px.bar(
-          df_prov.sort_values(by="cantidad", ascending=True),
+          df_prov,
           x="cantidad",
           y="provincia",
           orientation="h",
           color="cantidad",
           color_continuous_scale="Blues",
+          text="cantidad",
+          custom_data=["porcentaje"],
+          title="Registros por provincia",
+      )
+      fig_map.update_traces(
+          texttemplate="%{x:,.0f}",
+          textposition="outside",
+          cliponaxis=False,
+          hovertemplate=(
+              "%{y}<br>Registros: %{x:,.0f}"
+              "<br>Participación: %{customdata[0]:.1f}%<extra></extra>"
+          ),
       )
       fig_map.update_layout(
           plot_bgcolor="white",
           paper_bgcolor="white",
-          margin=dict(t=20, b=20, l=20, r=20),
+          height=max(420, len(df_prov) * 32),
+          margin=dict(t=55, b=35, l=20, r=55),
+          coloraxis_showscale=False,
+          xaxis_title="Cantidad de registros",
+          yaxis_title="",
       )
+      fig_map.update_yaxes(autorange="reversed")
       st.plotly_chart(fig_map, use_container_width=True)
     with col_m2:
       st.markdown("### Resumen por Provincia")
@@ -974,9 +1119,10 @@ with tab3:
 
 with tab4:
   st.subheader("Demanda de cursos y tasa de graduación")
-  if not df_f.empty:
+  df_demanda_periodo, _, _ = filtrar_por_periodo(df_f, "demanda")
+  if not df_demanda_periodo.empty:
     df_demanda = (
-        df_f.groupby("curso")
+        df_demanda_periodo.groupby("curso")
         .agg(
             total=("curso", "size"),
             graduados=("es_graduado", "sum"),
@@ -986,7 +1132,13 @@ with tab4:
     df_demanda["tasa_graduacion"] = (
         df_demanda["graduados"] / df_demanda["total"] * 100
     )
-    df_demanda_top = df_demanda.nlargest(15, "total")
+    cantidad_cursos = st.selectbox(
+        "Cursos a mostrar",
+        [10, 15, 20, 30],
+        index=1,
+        key="demanda_cantidad_cursos",
+    )
+    df_demanda_top = df_demanda.nlargest(cantidad_cursos, "total")
     col_demanda, col_cumplimiento = st.columns(2)
     with col_demanda:
       fig_demanda = px.bar(
@@ -998,6 +1150,12 @@ with tab4:
           labels={"total": "Registros", "curso": "Curso"},
           color="total",
           color_continuous_scale="Blues",
+      )
+      fig_demanda.update_layout(
+          height=max(430, len(df_demanda_top) * 30),
+          coloraxis_showscale=False,
+          xaxis_title="Registros",
+          yaxis_title="",
       )
       st.plotly_chart(fig_demanda, use_container_width=True)
     with col_cumplimiento:
@@ -1014,10 +1172,21 @@ with tab4:
           range_x=[0, 100],
           color="tasa_graduacion",
           color_continuous_scale="Teal",
+          text="tasa_graduacion",
+      )
+      fig_cumplimiento.update_traces(
+          texttemplate="%{x:.1f}%",
+          textposition="outside",
+          cliponaxis=False,
+      )
+      fig_cumplimiento.update_layout(
+          height=max(430, len(df_demanda_top) * 30),
+          coloraxis_showscale=False,
+          yaxis_title="",
       )
       st.plotly_chart(fig_cumplimiento, use_container_width=True)
     df_modalidad = (
-        df_f.groupby(["modalidad", "condicion"], dropna=False)
+        df_demanda_periodo.groupby(["modalidad", "condicion"], dropna=False)
         .size()
         .reset_index(name="registros")
     )
@@ -1120,27 +1289,130 @@ with tab5:
 
 with tab6:
   st.subheader("🔮 Modelo Predictivo y Proyección de Titulaciones")
-  if not df_f.empty and "anio" in df_f.columns:
+  df_proyeccion = df_f[df_f["es_graduado"] & (df_f["anio"] > 2000)].copy()
+  anios_proyeccion = sorted(df_proyeccion["anio"].unique().tolist())
+  if anios_proyeccion:
+    controles_proyeccion = st.columns(4)
+    with controles_proyeccion[0]:
+      if len(anios_proyeccion) > 1:
+        clave_rango = "proyeccion_rango_anios"
+        rango_actual = st.session_state.get(clave_rango)
+        if (
+            not rango_actual
+            or rango_actual[0] not in anios_proyeccion
+            or rango_actual[1] not in anios_proyeccion
+        ):
+          st.session_state[clave_rango] = (
+              anios_proyeccion[0],
+              anios_proyeccion[-1],
+          )
+        rango_anios = st.select_slider(
+            "Rango histórico",
+            options=anios_proyeccion,
+            value=(anios_proyeccion[0], anios_proyeccion[-1]),
+            key=clave_rango,
+        )
+        anio_inicio, anio_fin = rango_anios
+      else:
+        anio_inicio = anio_fin = anios_proyeccion[0]
+        st.metric("Año disponible", anio_inicio)
+    with controles_proyeccion[1]:
+      meses_proyeccion = sorted(
+          int(mes)
+          for mes in df_proyeccion["mes"].dropna().unique()
+          if 1 <= int(mes) <= 12
+      )
+      opciones_meses_proyeccion = ["Todos"] + meses_proyeccion
+      if (
+          st.session_state.get("proyeccion_mes", "Todos")
+          not in opciones_meses_proyeccion
+      ):
+        st.session_state["proyeccion_mes"] = "Todos"
+      mes_proyeccion = st.selectbox(
+          "Mes para analizar",
+          opciones_meses_proyeccion,
+          format_func=lambda valor: (
+              "Todos los meses"
+              if valor == "Todos"
+              else NOMBRES_MESES.get(valor, str(valor))
+          ),
+          key="proyeccion_mes",
+      )
+    with controles_proyeccion[2]:
+      modalidades_proyeccion = ["Todas"] + sorted(
+          df_proyeccion["modalidad"].dropna().unique().tolist()
+      )
+      if (
+          st.session_state.get("proyeccion_modalidad", "Todas")
+          not in modalidades_proyeccion
+      ):
+        st.session_state["proyeccion_modalidad"] = "Todas"
+      modalidad_proyeccion = st.selectbox(
+          "Modalidad",
+          modalidades_proyeccion,
+          key="proyeccion_modalidad",
+      )
+    with controles_proyeccion[3]:
+      cursos_proyeccion = ["Todos"] + sorted(
+          df_proyeccion["curso"].dropna().unique().tolist()
+      )
+      if (
+          st.session_state.get("proyeccion_curso", "Todos")
+          not in cursos_proyeccion
+      ):
+        st.session_state["proyeccion_curso"] = "Todos"
+      curso_proyeccion = st.selectbox(
+          "Curso",
+          cursos_proyeccion,
+          key="proyeccion_curso",
+      )
+    df_proyeccion = df_proyeccion[
+        df_proyeccion["anio"].between(anio_inicio, anio_fin)
+    ]
+    if mes_proyeccion != "Todos":
+      df_proyeccion = df_proyeccion[
+          df_proyeccion["mes"] == mes_proyeccion
+      ]
+    if modalidad_proyeccion != "Todas":
+      df_proyeccion = df_proyeccion[
+          df_proyeccion["modalidad"] == modalidad_proyeccion
+      ]
+    if curso_proyeccion != "Todos":
+      df_proyeccion = df_proyeccion[
+          df_proyeccion["curso"] == curso_proyeccion
+      ]
     df_p = (
-        df_f[
-            (df_f["es_graduado"])
-            & (df_f["anio"] >= 2010)
-            & (df_f["anio"] <= 2025)
-        ]
-        .groupby("anio")
+        df_proyeccion.groupby("anio")
         .size()
         .reset_index(name="total")
+    )
+    horizonte = st.slider(
+        "Años a proyectar",
+        min_value=1,
+        max_value=10,
+        value=5,
+        key="proyeccion_horizonte",
     )
     if len(df_p) > 3:
       X = df_p[["anio"]]
       y = df_p["total"]
       model = LinearRegression()
       model.fit(X, y)
-      anios_futuros = np.array([[2026], [2027], [2028], [2029], [2030]])
-      predicciones = model.predict(anios_futuros)
+      ultimo_anio = int(df_p["anio"].max())
+      df_anios_futuros = pd.DataFrame(
+          {
+              "anio": np.arange(
+                  ultimo_anio + 1, ultimo_anio + horizonte + 1
+              )
+          }
+      )
+      predicciones = model.predict(df_anios_futuros)
 
       df_futuro = pd.DataFrame(
-          {"anio": [2026, 2027, 2028, 2029, 2030], "total": predicciones}
+          {
+              "anio": df_anios_futuros["anio"],
+              "total": np.maximum(predicciones, 0),
+          }
       )
 
       fig_pred = px.line(
@@ -1159,15 +1431,23 @@ with tab6:
               line=dict(dash="dash", color="red"),
           )
       )
+      fig_pred.update_layout(
+          xaxis_title="Año",
+          yaxis_title="Graduados",
+          hovermode="x unified",
+      )
       st.plotly_chart(fig_pred, use_container_width=True)
       st.success(
-          "Estimación lineal basada en graduados históricos; es una referencia"
+          "Estimación lineal según los filtros seleccionados; es una referencia"
           " y no una garantía de resultados futuros."
       )
     else:
       st.warning(
-          "Se requieren más datos históricos para ejecutar la proyección."
+          "Se requieren al menos cuatro años con registros para ejecutar la"
+          " proyección. Amplía el rango o cambia los filtros."
       )
+  else:
+    st.info("No hay registros de graduados con año válido para proyectar.")
 
 with tab7:
   st.subheader("Auditoría de DNI y calidad de registros")
