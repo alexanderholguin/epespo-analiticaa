@@ -18,7 +18,6 @@ from db import (
 # ============================================================
 
 COOKIE_SESION = "epespo_session"
-DIAS_PERSISTENCIA_COOKIE = 3650
 
 USUARIOS_PERMITIDOS = {
     "admin_epespo": {
@@ -112,7 +111,7 @@ def _error_persistencia_sesion(error):
 
 
 # ============================================================
-# 1. VERIFICACIÓN DE CREDENCIALES (Texto Plano - Definitivo)
+# 1. VERIFICACIÓN DE CREDENCIALES
 # ============================================================
 
 def verificar_credenciales(usuario, password):
@@ -134,7 +133,6 @@ def aplicar_estilos_login():
     st.markdown(
         """
         <style>
-        /* FONDO GENERAL */
         .stApp {
             background:
                 radial-gradient(
@@ -149,19 +147,16 @@ def aplicar_estilos_login():
                 );
         }
 
-        /* CONTENEDOR PRINCIPAL */
         .block-container {
             max-width: 1100px;
             padding-top: 2rem;
             padding-bottom: 2rem;
         }
 
-        /* OCULTAR DECORACIÓN SUPERIOR */
         [data-testid="stDecoration"] {
             display: none;
         }
 
-        /* ENCABEZADO INSTITUCIONAL */
         .epespo-header {
             text-align: center;
             padding: 24px 15px 12px;
@@ -203,7 +198,6 @@ def aplicar_estilos_login():
             margin: 20px auto 28px;
         }
 
-        /* FORMULARIO */
         div[data-testid="stForm"] {
             background: #FFFFFF;
             border: 1px solid #DCE8F5;
@@ -213,7 +207,6 @@ def aplicar_estilos_login():
             box-shadow: 0 12px 35px rgba(15, 54, 102, 0.09);
         }
 
-        /* CAMPOS DE TEXTO */
         div[data-testid="stTextInput"] label {
             color: #254B70;
             font-weight: 600;
@@ -232,7 +225,6 @@ def aplicar_estilos_login():
             box-shadow: 0 0 0 1px rgba(25, 118, 210, 0.12);
         }
 
-        /* BOTÓN PRINCIPAL */
         div[data-testid="stFormSubmitButton"] button {
             width: 100%;
             min-height: 47px;
@@ -252,7 +244,6 @@ def aplicar_estilos_login():
             box-shadow: 0 6px 16px rgba(21, 101, 192, 0.20);
         }
 
-        /* PIE INSTITUCIONAL */
         .epespo-footer {
             text-align: center;
             color: #7A8DA3;
@@ -381,15 +372,12 @@ def render_login(cookie_manager):
                                 usuario_normalizado,
                                 token,
                             )
+                            # COOKIE DE SESIÓN PURA (SIN max_age NI expires_at)
+                            # Se destruye automáticamente al cerrar el navegador
                             cookie_manager.set(
                                 COOKIE_SESION,
                                 token,
                                 key="set_epespo_auth_cookie",
-                                max_age=(
-                                    DIAS_PERSISTENCIA_COOKIE * 24 * 60 * 60
-                                ),
-                                expires_at=datetime.now()
-                                + timedelta(days=DIAS_PERSISTENCIA_COOKIE),
                                 secure=_cookie_segura(),
                                 same_site="strict",
                             )
