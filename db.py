@@ -3,7 +3,7 @@ import os
 import streamlit as st
 import pandas as pd
 import psycopg2
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 
 
 def _get_setting(name: str):
@@ -119,3 +119,62 @@ def insertar_registros_masivos(df_nuevo: pd.DataFrame, modo: str = "append") -> 
     except Exception as e:
         st.error(f"Error al actualizar la base de datos en PostgreSQL: {e}")
         return False
+
+
+def actualizar_datos_persona(
+    dni_anterior: str,
+    nombres_anteriores: str,
+    matricula_anterior: str,
+    dni_nuevo: str,
+    nombres_nuevos: str,
+    matricula_nueva: str,
+) -> int:
+    if dni_anterior:
+        identidad_sql = (
+            "("
+            "regexp_replace(COALESCE(cedula::text, ''), '[^0-9]', '', 'g') "
+            "= :dni_anterior OR "
+            "'0' || regexp_replace(COALESCE(cedula::text, ''), "
+            "'[^0-9]', '', 'g') = :dni_anterior"
+            ")"
+        )
+        parametros = {"dni_anterior": dni_anterior}
+    else:
+        if not nombres_anteriores.strip() or not matricula_anterior.strip():
+            raise ValueError(
+                "Sin una cédula previa, se necesitan nombres y matrícula "
+                "para identificar los registros de forma segura."
+            )
+        identidad_sql = """
+            lower(btrim(COALESCE(nombres, ''))) = lower(:nombres_anteriores)
+            AND btrim(COALESCE(matricula::text, '')) = :matricula_anterior
+            AND (
+                regexp_replace(COALESCE(cedula::text, ''), '[^0-9]', '', 'g') = ''
+                OR regexp_replace(COALESCE(cedula::text, ''), '[^0-9]', '', 'g') ~ '^0+$'
+            )
+        """
+        parametros = {
+            "nombres_anteriores": nombres_anteriores.strip(),
+            "matricula_anterior": matricula_anterior.strip(),
+        }
+
+    consulta = text(
+        f"""
+        UPDATE graduados_epespo
+        SET cedula = :dni_nuevo,
+            nombres = :nombres_nuevos,
+            matricula = :matricula_nueva
+        WHERE {identidad_sql}
+        """
+    )
+    parametros.update(
+        {
+            "dni_nuevo": dni_nuevo.strip() or None,
+            "nombres_nuevos": nombres_nuevos.strip() or None,
+            "matricula_nueva": matricula_nueva.strip() or None,
+        }
+    )
+
+    with get_engine().begin() as connection:
+        resultado = connection.execute(consulta, parametros)
+    return resultado.rowcount

@@ -1,4 +1,5 @@
 from calendar import monthrange
+from io import BytesIO
 import os
 import numpy as np
 import pandas as pd
@@ -8,11 +9,12 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.preprocessing import PolynomialFeatures
 from sqlalchemy import inspect
+from sqlalchemy.exc import SQLAlchemyError
 import streamlit as st
 import unicodedata
 
 from auth import render_login, cerrar_sesion
-from db import get_engine
+from db import actualizar_datos_persona, get_engine
 
 st.set_page_config(
     page_title="EPESPO - Suite Analítica y Estratégica Marítima",
@@ -279,6 +281,10 @@ def limpiar_dni(val):
   return s_digits if s_digits else s
 
 
+def texto_celda(valor):
+  return "" if pd.isna(valor) else str(valor).strip()
+
+
 def clasificar_dni(val):
   if pd.isna(val):
     return "Sin DNI"
@@ -419,6 +425,155 @@ with st.sidebar.expander("🔍 Búsqueda de Ciudadano", expanded=False):
       st.session_state["search_ape_side"] = ""
       st.rerun()
 
+  if dni_sidebar or ape_sidebar:
+    coincidencias = df_raw.copy()
+    if dni_sidebar:
+      busqueda_dni = "".join(
+          caracter for caracter in dni_sidebar if caracter.isdigit()
+      )
+      if not busqueda_dni:
+        busqueda_dni = dni_sidebar.strip()
+      coincidencias = coincidencias[
+          coincidencias["cedula_limpia"]
+          .astype(str)
+          .str.contains(busqueda_dni, na=False, regex=False)
+      ]
+    if ape_sidebar:
+      coincidencias = coincidencias[
+          coincidencias["nombres"]
+          .fillna("")
+          .astype(str)
+          .str.contains(ape_sidebar.strip(), case=False, na=False, regex=False)
+      ]
+
+    st.caption(f"Coincidencias encontradas: {len(coincidencias):,} registros")
+    if coincidencias.empty:
+      st.info("No se encontraron ciudadanos con esos datos.")
+    else:
+      grupos_persona = {}
+      for _, fila in coincidencias.iterrows():
+        dni_digitos = "".join(
+            caracter
+            for caracter in str(fila["cedula_limpia"])
+            if caracter.isdigit()
+        )
+        if dni_digitos and set(dni_digitos) != {"0"}:
+          clave_persona = ("dni", dni_digitos)
+        else:
+          nombre_clave = texto_celda(fila["nombres"]).casefold()
+          matricula_clave = texto_celda(fila["matricula"]).casefold()
+          clave_persona = ("sin_dni", nombre_clave, matricula_clave)
+        grupos_persona.setdefault(clave_persona, []).append(fila)
+
+      claves_persona = list(grupos_persona)
+
+      def etiqueta_persona(indice):
+        clave = claves_persona[indice]
+        filas = grupos_persona[clave]
+        primera_fila = filas[0]
+        dni = texto_celda(primera_fila["cedula_limpia"])
+        nombre = texto_celda(primera_fila["nombres"])
+        matricula = texto_celda(primera_fila["matricula"])
+        identificador = dni if clave[0] == "dni" else "Sin DNI"
+        return (
+            f"{identificador} · {nombre or 'Sin nombre'} · "
+            f"Matrícula: {matricula or 'Sin matrícula'} · "
+            f"{len(filas)} registro(s) · Resultado {indice + 1}"
+        )
+
+      indice_persona = st.selectbox(
+          "Ciudadano encontrado:",
+          options=range(len(claves_persona)),
+          format_func=etiqueta_persona,
+          key="ciudadano_editar_seleccion",
+      )
+      clave_seleccionada = claves_persona[indice_persona]
+      registros_persona = pd.DataFrame(grupos_persona[clave_seleccionada])
+      st.dataframe(
+          registros_persona[
+              ["cedula", "nombres", "matricula", "curso", "anio", "fecha"]
+          ].drop_duplicates(),
+          use_container_width=True,
+          hide_index=True,
+      )
+
+      if st.session_state.get("rol") != "admin":
+        st.info("Solo un usuario administrador puede editar ciudadanos.")
+      elif clave_seleccionada[0] == "sin_dni" and (
+          not clave_seleccionada[1] or not clave_seleccionada[2]
+      ):
+        st.warning(
+            "No se puede identificar de forma segura a esta persona para "
+            "actualizar todos sus registros. Se requiere nombre y matrícula."
+        )
+      else:
+        fila_seleccionada = registros_persona.iloc[0]
+        dni_actual = "".join(
+            caracter
+            for caracter in str(fila_seleccionada["cedula_limpia"])
+            if caracter.isdigit()
+        )
+        if set(dni_actual or "0") == {"0"}:
+          dni_actual = ""
+        nombres_actuales = texto_celda(fila_seleccionada["nombres"])
+        matricula_actual = texto_celda(fila_seleccionada["matricula"])
+
+        with st.form("form_editar_ciudadano"):
+          dni_nuevo = st.text_input(
+              "Cédula (10 dígitos; vacío si no tiene):",
+              value=dni_actual,
+          ).strip()
+          nombres_nuevos = st.text_input(
+              "Nombres y apellidos:",
+              value=nombres_actuales,
+          ).strip()
+          matricula_nueva = st.text_input(
+              "Matrícula:",
+              value=matricula_actual,
+          ).strip()
+          guardar_edicion = st.form_submit_button(
+              "Actualizar registros de esta persona",
+              use_container_width=True,
+          )
+
+        if guardar_edicion:
+          if dni_nuevo and dni_nuevo != dni_actual and (
+              not dni_nuevo.isdigit() or len(dni_nuevo) != 10
+          ):
+            st.error("La cédula debe tener exactamente 10 dígitos.")
+          else:
+            dni_anterior = (
+                clave_seleccionada[1]
+                if clave_seleccionada[0] == "dni"
+                else ""
+            )
+            nombre_anterior = texto_celda(fila_seleccionada["nombres"])
+            matricula_anterior = texto_celda(fila_seleccionada["matricula"])
+            try:
+              registros_actualizados = actualizar_datos_persona(
+                  dni_anterior,
+                  nombre_anterior,
+                  matricula_anterior,
+                  dni_nuevo,
+                  nombres_nuevos,
+                  matricula_nueva,
+              )
+            except ValueError as error:
+              st.error(str(error))
+            except SQLAlchemyError as error:
+              st.error(f"No se pudieron actualizar los registros: {error}")
+            else:
+              if registros_actualizados:
+                st.session_state["mensaje_edicion_ciudadano"] = (
+                    f"Se actualizaron {registros_actualizados} registro(s)."
+                )
+                st.rerun()
+              else:
+                st.error("No se encontró ningún registro para actualizar.")
+
+  if st.session_state.get("mensaje_edicion_ciudadano"):
+    st.success(st.session_state.pop("mensaje_edicion_ciudadano"))
+
 with st.sidebar.expander("⚙️ Filtros Globales de Datos", expanded=False):
   provincias_disp = ["Todas las Provincias"] + sorted(
       [p for p in df_raw["provincia"].dropna().unique() if p != "No Registrada"]
@@ -463,10 +618,17 @@ elif cond_sel == "No culminó":
   ]
 
 if dni_sidebar:
-  df_f = df_f[df_f["cedula_limpia"].str.contains(dni_sidebar, na=False)]
+  df_f = df_f[
+      df_f["cedula_limpia"]
+      .astype(str)
+      .str.contains(busqueda_dni, na=False, regex=False)
+  ]
 if ape_sidebar:
   df_f = df_f[
-      df_f["nombres"].str.upper().str.contains(ape_sidebar.upper(), na=False)
+      df_f["nombres"]
+      .fillna("")
+      .astype(str)
+      .str.contains(ape_sidebar.strip(), case=False, na=False, regex=False)
   ]
 
 # =============================================================
@@ -850,6 +1012,45 @@ with tab7:
   sin_dni = int((df_f["estado_dni"] == "Sin DNI").sum())
   dni_irregular = int((df_f["estado_dni"] == "DNI irregular").sum())
   con_dni = int((df_f["estado_dni"] == "Con DNI").sum())
+  campos_textuales_completos = {}
+  for columna in ["nombres", "matricula", "curso", "modalidad"]:
+    valores = (
+        df_f[columna]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .str.casefold()
+    )
+    valores_invalidos = {
+        "",
+        "nan",
+        "none",
+        "null",
+        "n/a",
+        "na",
+        "s/d",
+        "sin dato",
+        "sin especificar",
+        "sin registro",
+        "no registra",
+        "no registrado",
+        "no registrada",
+    }
+    if columna == "nombres":
+      valores_invalidos.add("sin nombre")
+    campos_textuales_completos[columna] = ~valores.isin(valores_invalidos)
+
+  anio_valido = pd.to_numeric(df_f["anio"], errors="coerce").gt(0)
+  fecha_valida = pd.to_datetime(df_f["fecha"], errors="coerce").notna()
+  mascara_info_completa = (
+      df_f["estado_dni"].eq("Con DNI")
+      & campos_textuales_completos["nombres"]
+      & campos_textuales_completos["matricula"]
+      & campos_textuales_completos["curso"]
+      & campos_textuales_completos["modalidad"]
+      & (anio_valido | fecha_valida)
+  )
+  df_con_info_completa = df_f[mascara_info_completa]
   ids_con_varios_registros = int(
       (
           df_f.loc[df_f["estado_dni"] == "Con DNI", "cedula_limpia"]
@@ -858,7 +1059,13 @@ with tab7:
       ).sum()
   )
 
-  col_sin_dni, col_irregular, col_con_dni, col_repetidos = st.columns(4)
+  (
+      col_sin_dni,
+      col_irregular,
+      col_con_dni,
+      col_completos,
+      col_repetidos,
+  ) = st.columns(5)
   col_sin_dni.metric(
       "Registros sin DNI",
       f"{sin_dni:,}",
@@ -874,11 +1081,80 @@ with tab7:
       ),
   )
   col_con_dni.metric("Formato de DNI completo", f"{con_dni:,}")
+  col_completos.metric(
+      "DNI e información completa",
+      f"{len(df_con_info_completa):,}",
+  )
   col_repetidos.metric("DNI en varios registros", f"{ids_con_varios_registros:,}")
   st.caption(
       "Un DNI asociado a varios registros puede corresponder a varios cursos "
       "o reingresos; no implica por sí solo un duplicado. Los conteos son de "
-      "registros y no de personas únicas cuando falta el DNI."
+      "registros. Para considerar la información completa se requiere DNI "
+      "válido, nombres, matrícula, curso, modalidad y año o fecha."
+  )
+
+  st.markdown("#### Descargar registros")
+  opciones_descarga = {
+      f"Todos los registros ({len(df_f):,})": df_f,
+      f"Registros sin DNI ({sin_dni:,})": df_f[
+          df_f["estado_dni"] == "Sin DNI"
+      ],
+      (
+          "DNI e información completa "
+          f"({len(df_con_info_completa):,})"
+      ): df_con_info_completa,
+  }
+  seleccion_descarga = st.selectbox(
+      "Conjunto de datos:",
+      options=list(opciones_descarga),
+      key="auditoria_conjunto_descarga",
+  )
+  df_descarga = opciones_descarga[seleccion_descarga]
+  columnas_descarga = [
+      columna
+      for columna in [
+          "cedula",
+          "nombres",
+          "matricula",
+          "anio",
+          "mes",
+          "fecha",
+          "fec_ini",
+          "fec_fin",
+          "curso",
+          "modalidad",
+          "provincia",
+          "condicion",
+          "impresion",
+          "estado_dni",
+      ]
+      if columna in df_descarga.columns
+  ]
+  df_descarga = df_descarga[columnas_descarga]
+  archivo_excel = BytesIO()
+  with pd.ExcelWriter(archivo_excel, engine="openpyxl") as escritor:
+    df_descarga.to_excel(escritor, index=False, sheet_name="Registros")
+  nombre_archivo = (
+      seleccion_descarga.split(" (")[0]
+      .lower()
+      .replace(" ", "_")
+      .replace("ó", "o")
+      .replace("í", "i")
+  )
+  col_descarga_excel, col_descarga_csv = st.columns(2)
+  col_descarga_excel.download_button(
+      "Descargar Excel",
+      data=archivo_excel.getvalue(),
+      file_name=f"{nombre_archivo}.xlsx",
+      mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      use_container_width=True,
+  )
+  col_descarga_csv.download_button(
+      "Descargar CSV",
+      data=df_descarga.to_csv(index=False).encode("utf-8-sig"),
+      file_name=f"{nombre_archivo}.csv",
+      mime="text/csv",
+      use_container_width=True,
   )
 
   if not df_f.empty:
