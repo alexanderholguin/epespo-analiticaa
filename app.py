@@ -14,7 +14,7 @@ import streamlit as st
 import unicodedata
 
 from auth import render_login, cerrar_sesion
-from db import actualizar_datos_persona, get_engine
+from db import actualizar_registros_ciudadano, get_engine
 
 st.set_page_config(
     page_title="EPESPO - Suite Analítica y Estratégica Marítima",
@@ -285,6 +285,40 @@ def texto_celda(valor):
   return "" if pd.isna(valor) else str(valor).strip()
 
 
+def texto_entero(valor):
+  if pd.isna(valor):
+    return ""
+  try:
+    return str(int(float(valor)))
+  except (OverflowError, TypeError, ValueError):
+    return texto_celda(valor)
+
+
+def texto_fecha(valor):
+  if pd.isna(valor):
+    return ""
+  fecha = pd.to_datetime(valor, errors="coerce")
+  return "" if pd.isna(fecha) else fecha.strftime("%Y-%m-%d")
+
+
+def convertir_entero_formulario(valor, campo):
+  if not valor.strip():
+    return None
+  try:
+    return int(valor)
+  except ValueError as error:
+    raise ValueError(f"{campo} debe ser un número entero.") from error
+
+
+def convertir_fecha_formulario(valor, campo):
+  if not valor.strip():
+    return None
+  fecha = pd.to_datetime(valor, format="%Y-%m-%d", errors="coerce")
+  if pd.isna(fecha):
+    raise ValueError(f"{campo} debe tener el formato AAAA-MM-DD.")
+  return fecha.date()
+
+
 def clasificar_dni(val):
   if pd.isna(val):
     return "Sin DNI"
@@ -369,6 +403,7 @@ if df_raw.empty:
   st.error("No se encontraron registros en la base de datos.")
   st.stop()
 
+df_original = df_raw.copy()
 df_raw["cedula_limpia"] = df_raw["cedula"].apply(limpiar_dni)
 df_raw["estado_dni"] = df_raw["cedula"].apply(clasificar_dni)
 df_raw["curso"] = df_raw["curso"].apply(normalizar_curso)
@@ -463,14 +498,14 @@ with st.sidebar.expander("🔍 Búsqueda de Ciudadano", expanded=False):
           nombre_clave = texto_celda(fila["nombres"]).casefold()
           matricula_clave = texto_celda(fila["matricula"]).casefold()
           clave_persona = ("sin_dni", nombre_clave, matricula_clave)
-        grupos_persona.setdefault(clave_persona, []).append(fila)
+        grupos_persona.setdefault(clave_persona, []).append(fila.name)
 
       claves_persona = list(grupos_persona)
 
       def etiqueta_persona(indice):
         clave = claves_persona[indice]
         filas = grupos_persona[clave]
-        primera_fila = filas[0]
+        primera_fila = df_raw.loc[filas[0]]
         dni = texto_celda(primera_fila["cedula_limpia"])
         nombre = texto_celda(primera_fila["nombres"])
         matricula = texto_celda(primera_fila["matricula"])
@@ -488,26 +523,80 @@ with st.sidebar.expander("🔍 Búsqueda de Ciudadano", expanded=False):
           key="ciudadano_editar_seleccion",
       )
       clave_seleccionada = claves_persona[indice_persona]
-      registros_persona = pd.DataFrame(grupos_persona[clave_seleccionada])
+      registros_persona = df_raw.loc[grupos_persona[clave_seleccionada]]
+      columnas_resumen = [
+          columna
+          for columna in [
+              "cedula",
+              "nombres",
+              "matricula",
+              "curso",
+              "anio",
+              "fecha",
+          ]
+          if columna in registros_persona.columns
+      ]
       st.dataframe(
-          registros_persona[
-              ["cedula", "nombres", "matricula", "curso", "anio", "fecha"]
-          ].drop_duplicates(),
+          registros_persona[columnas_resumen].drop_duplicates(),
           use_container_width=True,
           hide_index=True,
       )
 
       if st.session_state.get("rol") != "admin":
         st.info("Solo un usuario administrador puede editar ciudadanos.")
-      elif clave_seleccionada[0] == "sin_dni" and (
-          not clave_seleccionada[1] or not clave_seleccionada[2]
-      ):
-        st.warning(
-            "No se puede identificar de forma segura a esta persona para "
-            "actualizar todos sus registros. Se requiere nombre y matrícula."
-        )
       else:
-        fila_seleccionada = registros_persona.iloc[0]
+        def etiqueta_registro(indice):
+          registro = registros_persona.loc[indice]
+          return (
+              f"{texto_celda(registro.get('curso')) or 'Sin curso'} · "
+              f"Año {texto_entero(registro.get('anio')) or 's/d'} · "
+              f"{texto_fecha(df_original.loc[indice].get('fecha')) or 'Sin fecha'}"
+          )
+
+        indice_registro = st.selectbox(
+            "Registro a editar:",
+            options=registros_persona.index.tolist(),
+            format_func=etiqueta_registro,
+            key="ciudadano_registro_editar",
+        )
+        fila_seleccionada = registros_persona.loc[indice_registro]
+        fila_original = df_original.loc[indice_registro]
+        campos_registro = [
+            columna
+            for columna in [
+                "cedula",
+                "nombres",
+                "matricula",
+                "anio",
+                "mes",
+                "fecha",
+                "fec_ini",
+                "fec_fin",
+                "curso",
+                "modalidad",
+                "provincia",
+                "condicion",
+                "impresion",
+            ]
+            if columna in df_original.columns
+        ]
+        identidad_segura = (
+            clave_seleccionada[0] == "dni"
+            or bool(clave_seleccionada[1] and clave_seleccionada[2])
+        )
+        if not identidad_segura:
+          st.info(
+              "No hay datos suficientes para agrupar a esta persona. Se "
+              "actualizará solo el registro seleccionado, identificado por "
+              "sus valores actuales; no se crearán filas nuevas."
+          )
+        else:
+          st.caption(
+              "Cédula, nombres y matrícula se actualizan en todos los "
+              "registros vinculados. Los demás campos solo cambian en el "
+              "registro seleccionado."
+          )
+
         dni_actual = "".join(
             caracter
             for caracter in str(fila_seleccionada["cedula_limpia"])
@@ -515,28 +604,55 @@ with st.sidebar.expander("🔍 Búsqueda de Ciudadano", expanded=False):
         )
         if set(dni_actual or "0") == {"0"}:
           dni_actual = ""
-        nombres_actuales = texto_celda(fila_seleccionada["nombres"])
-        matricula_actual = texto_celda(fila_seleccionada["matricula"])
 
-        with st.form("form_editar_ciudadano"):
-          dni_nuevo = st.text_input(
-              "Cédula (10 dígitos; vacío si no tiene):",
-              value=dni_actual,
-          ).strip()
-          nombres_nuevos = st.text_input(
-              "Nombres y apellidos:",
-              value=nombres_actuales,
-          ).strip()
-          matricula_nueva = st.text_input(
-              "Matrícula:",
-              value=matricula_actual,
-          ).strip()
+        etiquetas_campos = {
+            "cedula": "Cédula (10 dígitos; vacío si no tiene)",
+            "nombres": "Nombres y apellidos",
+            "matricula": "Matrícula",
+            "anio": "Año",
+            "mes": "Mes (1-12; 0 o vacío si se desconoce)",
+            "fecha": "Fecha (AAAA-MM-DD)",
+            "fec_ini": "Fecha de inicio (AAAA-MM-DD)",
+            "fec_fin": "Fecha de fin (AAAA-MM-DD)",
+            "curso": "Curso",
+            "modalidad": "Modalidad",
+            "provincia": "Provincia",
+            "condicion": "Condición",
+            "impresion": "Código de impresión",
+        }
+        campos_enteros = {"anio", "mes", "impresion"}
+        campos_fecha = {"fecha", "fec_ini", "fec_fin"}
+        valores_formulario = {}
+
+        with st.form(f"form_editar_ciudadano_{indice_registro}"):
+          columna_personal, columna_academica = st.columns(2)
+          for campo in campos_registro:
+            contenedor = (
+                columna_personal
+                if campo in {"cedula", "nombres", "matricula", "anio", "mes", "fecha"}
+                else columna_academica
+            )
+            if campo == "cedula":
+              valor_inicial = dni_actual
+            elif campo in campos_enteros:
+              valor_inicial = texto_entero(fila_original.get(campo))
+            elif campo in campos_fecha:
+              valor_inicial = texto_fecha(fila_original.get(campo))
+            else:
+              valor_inicial = texto_celda(fila_original.get(campo))
+            with contenedor:
+              valores_formulario[campo] = st.text_input(
+                  etiquetas_campos[campo],
+                  value=valor_inicial,
+                  key=f"editar_{campo}_{indice_registro}",
+              ).strip()
           guardar_edicion = st.form_submit_button(
-              "Actualizar registros de esta persona",
+              "Guardar cambios",
               use_container_width=True,
           )
 
         if guardar_edicion:
+          dni_nuevo = valores_formulario.get("cedula", "")
           if dni_nuevo and dni_nuevo != dni_actual and (
               not dni_nuevo.isdigit() or len(dni_nuevo) != 10
           ):
@@ -547,16 +663,32 @@ with st.sidebar.expander("🔍 Búsqueda de Ciudadano", expanded=False):
                 if clave_seleccionada[0] == "dni"
                 else ""
             )
-            nombre_anterior = texto_celda(fila_seleccionada["nombres"])
-            matricula_anterior = texto_celda(fila_seleccionada["matricula"])
             try:
-              registros_actualizados = actualizar_datos_persona(
+              datos_nuevos = {}
+              for campo, valor in valores_formulario.items():
+                if campo in campos_enteros:
+                  datos_nuevos[campo] = convertir_entero_formulario(
+                      valor,
+                      etiquetas_campos[campo],
+                  )
+                elif campo in campos_fecha:
+                  datos_nuevos[campo] = convertir_fecha_formulario(
+                      valor,
+                      etiquetas_campos[campo],
+                  )
+                else:
+                  datos_nuevos[campo] = valor or None
+
+              mes_parseado = datos_nuevos.get("mes")
+              if mes_parseado is not None and not 0 <= mes_parseado <= 12:
+                raise ValueError("Mes debe estar entre 0 y 12.")
+              registro_original = fila_original[campos_registro].to_dict()
+              registros_actualizados = actualizar_registros_ciudadano(
                   dni_anterior,
-                  nombre_anterior,
-                  matricula_anterior,
-                  dni_nuevo,
-                  nombres_nuevos,
-                  matricula_nueva,
+                  texto_celda(fila_original.get("nombres")),
+                  texto_celda(fila_original.get("matricula")),
+                  registro_original,
+                  datos_nuevos,
               )
             except ValueError as error:
               st.error(str(error))
@@ -565,7 +697,8 @@ with st.sidebar.expander("🔍 Búsqueda de Ciudadano", expanded=False):
             else:
               if registros_actualizados:
                 st.session_state["mensaje_edicion_ciudadano"] = (
-                    f"Se actualizaron {registros_actualizados} registro(s)."
+                    f"Se actualizaron {registros_actualizados} registro(s) "
+                    "existentes; no se insertaron filas."
                 )
                 st.rerun()
               else:

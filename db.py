@@ -121,60 +121,106 @@ def insertar_registros_masivos(df_nuevo: pd.DataFrame, modo: str = "append") -> 
         return False
 
 
-def actualizar_datos_persona(
+def actualizar_registros_ciudadano(
     dni_anterior: str,
     nombres_anteriores: str,
     matricula_anterior: str,
-    dni_nuevo: str,
-    nombres_nuevos: str,
-    matricula_nueva: str,
+    registro_original: dict,
+    datos_nuevos: dict,
 ) -> int:
+    columnas_disponibles = (
+        "cedula",
+        "nombres",
+        "matricula",
+        "anio",
+        "mes",
+        "fecha",
+        "fec_ini",
+        "fec_fin",
+        "curso",
+        "modalidad",
+        "provincia",
+        "condicion",
+        "impresion",
+    )
+    columnas_personales = {"cedula", "nombres", "matricula"}
+    if not columnas_personales.issubset(registro_original) or not (
+        columnas_personales.issubset(datos_nuevos)
+    ):
+        raise ValueError("Faltan campos personales para actualizar el registro.")
+    columnas = tuple(
+        columna
+        for columna in columnas_disponibles
+        if columna in registro_original and columna in datos_nuevos
+    )
+
+    snapshot_sql = " AND ".join(
+        f"{columna} IS NOT DISTINCT FROM :original_{columna}"
+        for columna in columnas
+    )
+    parametros = {
+        f"original_{columna}": _valor_sql(registro_original[columna])
+        for columna in columnas
+    }
+
     if dni_anterior:
-        identidad_sql = (
-            "("
-            "regexp_replace(COALESCE(cedula::text, ''), '[^0-9]', '', 'g') "
-            "= :dni_anterior OR "
-            "'0' || regexp_replace(COALESCE(cedula::text, ''), "
-            "'[^0-9]', '', 'g') = :dni_anterior"
-            ")"
+        digitos_sql = (
+            "regexp_replace(COALESCE(cedula::text, ''), '[^0-9]', '', 'g')"
         )
-        parametros = {"dni_anterior": dni_anterior}
+        identidad_sql = (
+            f"({digitos_sql} = :dni_anterior OR "
+            f"'0' || {digitos_sql} = :dni_anterior)"
+        )
+        parametros["dni_anterior"] = dni_anterior
     else:
-        if not nombres_anteriores.strip() or not matricula_anterior.strip():
-            raise ValueError(
-                "Sin una cédula previa, se necesitan nombres y matrícula "
-                "para identificar los registros de forma segura."
+        if nombres_anteriores.strip() and matricula_anterior.strip():
+            identidad_sql = """
+                lower(btrim(COALESCE(nombres, ''))) = lower(:nombres_anteriores)
+                AND lower(btrim(COALESCE(matricula::text, ''))) =
+                    lower(:matricula_anterior)
+                AND (
+                    regexp_replace(COALESCE(cedula::text, ''), '[^0-9]', '', 'g') = ''
+                    OR regexp_replace(COALESCE(cedula::text, ''), '[^0-9]', '', 'g') ~ '^0+$'
+                )
+            """
+            parametros.update(
+                {
+                    "nombres_anteriores": nombres_anteriores.strip(),
+                    "matricula_anterior": matricula_anterior.strip(),
+                }
             )
-        identidad_sql = """
-            lower(btrim(COALESCE(nombres, ''))) = lower(:nombres_anteriores)
-            AND btrim(COALESCE(matricula::text, '')) = :matricula_anterior
-            AND (
-                regexp_replace(COALESCE(cedula::text, ''), '[^0-9]', '', 'g') = ''
-                OR regexp_replace(COALESCE(cedula::text, ''), '[^0-9]', '', 'g') ~ '^0+$'
+        else:
+            identidad_sql = snapshot_sql
+
+    asignaciones = []
+    for columna in columnas:
+        nuevo_valor = _valor_sql(datos_nuevos[columna])
+        parametros[f"nuevo_{columna}"] = nuevo_valor
+        if columna in columnas_personales:
+            asignaciones.append(f"{columna} = :nuevo_{columna}")
+        else:
+            asignaciones.append(
+                f"{columna} = CASE WHEN ({snapshot_sql}) "
+                f"THEN :nuevo_{columna} ELSE {columna} END"
             )
-        """
-        parametros = {
-            "nombres_anteriores": nombres_anteriores.strip(),
-            "matricula_anterior": matricula_anterior.strip(),
-        }
 
     consulta = text(
         f"""
         UPDATE graduados_epespo
-        SET cedula = :dni_nuevo,
-            nombres = :nombres_nuevos,
-            matricula = :matricula_nueva
+        SET {", ".join(asignaciones)}
         WHERE {identidad_sql}
         """
     )
-    parametros.update(
-        {
-            "dni_nuevo": dni_nuevo.strip() or None,
-            "nombres_nuevos": nombres_nuevos.strip() or None,
-            "matricula_nueva": matricula_nueva.strip() or None,
-        }
-    )
-
     with get_engine().begin() as connection:
         resultado = connection.execute(consulta, parametros)
     return resultado.rowcount
+
+
+def _valor_sql(valor):
+    if valor is None or pd.isna(valor):
+        return None
+    if isinstance(valor, pd.Timestamp):
+        return valor.to_pydatetime()
+    if hasattr(valor, "item"):
+        return valor.item()
+    return valor
