@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from hashlib import sha256
 import os
 
@@ -261,14 +261,8 @@ def _asegurar_tabla_sesiones(connection) -> None:
 def guardar_sesion_autenticacion(
     token: str,
     usuario: str,
-    duracion_segundos: int,
-) -> float:
-    if duracion_segundos <= 0:
-        raise ValueError("La duración de la sesión debe ser positiva.")
-
-    expira_en = datetime.now(timezone.utc) + timedelta(
-        seconds=duracion_segundos
-    )
+) -> None:
+    expira_en = datetime(9999, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
     parametros = {
         "token_hash": _hash_token_sesion(token),
         "usuario": usuario,
@@ -292,8 +286,6 @@ def guardar_sesion_autenticacion(
             ),
             parametros,
         )
-    return expira_en.timestamp()
-
 
 def obtener_sesion_autenticacion(token: str):
     token_hash = _hash_token_sesion(token)
@@ -302,10 +294,9 @@ def obtener_sesion_autenticacion(token: str):
         sesion = connection.execute(
             text(
                 """
-                SELECT usuario, expira_en
+                SELECT usuario
                 FROM epespo_auth_sessions
                 WHERE token_hash = :token_hash
-                  AND expira_en > CURRENT_TIMESTAMP
                 """
             ),
             {"token_hash": token_hash},
@@ -313,7 +304,7 @@ def obtener_sesion_autenticacion(token: str):
 
     if sesion is None:
         return None
-    return sesion["usuario"], sesion["expira_en"].timestamp()
+    return sesion["usuario"]
 
 
 def revocar_sesion_autenticacion(token: str) -> None:

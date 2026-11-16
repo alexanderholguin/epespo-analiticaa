@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta
 import os
 import secrets
-import time
 
 import extra_streamlit_components as stx
 import streamlit as st
@@ -19,7 +18,7 @@ from db import (
 # ============================================================
 
 COOKIE_SESION = "epespo_session"
-DURACION_SESION_SEGUNDOS = 60 * 60
+DIAS_PERSISTENCIA_COOKIE = 3650
 
 USUARIOS_PERMITIDOS = {
     "admin_epespo": {
@@ -41,27 +40,22 @@ def crear_gestor_cookies():
 
 def _crear_token_sesion(usuario):
     token = secrets.token_urlsafe(32)
-    expiracion = guardar_sesion_autenticacion(
-        token,
-        usuario,
-        DURACION_SESION_SEGUNDOS,
-    )
-    return token, expiracion
+    guardar_sesion_autenticacion(token, usuario)
+    return token
 
 
 def _sesion_desde_token(token):
     if not isinstance(token, str):
         return None
 
-    sesion = obtener_sesion_autenticacion(token)
-    if sesion is None:
+    usuario = obtener_sesion_autenticacion(token)
+    if usuario is None:
         return None
 
-    usuario, expiracion = sesion
     if usuario not in USUARIOS_PERMITIDOS:
         revocar_sesion_autenticacion(token)
         return None
-    return usuario, expiracion
+    return usuario
 
 
 def _datos_usuario(usuario):
@@ -74,7 +68,7 @@ def _datos_usuario(usuario):
     }
 
 
-def _establecer_sesion(usuario, token, expiracion):
+def _establecer_sesion(usuario, token):
     datos = _datos_usuario(usuario)
     if not datos:
         return False
@@ -83,7 +77,6 @@ def _establecer_sesion(usuario, token, expiracion):
     st.session_state.nombre = datos["nombre"]
     st.session_state.rol = datos["rol"]
     st.session_state["_token_sesion"] = token
-    st.session_state["_expira_sesion"] = expiracion
     return True
 
 
@@ -94,7 +87,6 @@ def _limpiar_estado_sesion():
         "nombre",
         "rol",
         "_token_sesion",
-        "_expira_sesion",
         "login_usuario",
         "login_password",
     ):
@@ -300,13 +292,8 @@ def render_login(cookie_manager):
     if st.session_state.get("autenticado"):
         token = st.session_state.get("_token_sesion")
         usuario = st.session_state.get("usuario")
-        expiracion = st.session_state.get("_expira_sesion", 0)
-        if (
-            token
-            and usuario in USUARIOS_PERMITIDOS
-            and expiracion > time.time()
-        ):
-            _establecer_sesion(usuario, token, expiracion)
+        if token and usuario in USUARIOS_PERMITIDOS:
+            _establecer_sesion(usuario, token)
             return True
         if token:
             try:
@@ -319,16 +306,14 @@ def render_login(cookie_manager):
 
     token_cookie = cookie_manager.get(cookie=COOKIE_SESION)
     try:
-        sesion_cookie = _sesion_desde_token(token_cookie)
+        usuario_cookie = _sesion_desde_token(token_cookie)
     except (SQLAlchemyError, RuntimeError, ValueError) as error:
         _error_persistencia_sesion(error)
         st.stop()
-    if sesion_cookie:
-        usuario_cookie, expiracion_cookie = sesion_cookie
+    if usuario_cookie:
         if _establecer_sesion(
             usuario_cookie,
             token_cookie,
-            expiracion_cookie,
         ):
             return True
     if token_cookie is not None:
@@ -380,9 +365,7 @@ def render_login(cookie_manager):
 
                     if user_data:
                         try:
-                            token, expiracion = _crear_token_sesion(
-                                usuario_normalizado
-                            )
+                            token = _crear_token_sesion(usuario_normalizado)
                         except (
                             SQLAlchemyError,
                             RuntimeError,
@@ -397,17 +380,16 @@ def render_login(cookie_manager):
                             _establecer_sesion(
                                 usuario_normalizado,
                                 token,
-                                expiracion,
                             )
                             cookie_manager.set(
                                 COOKIE_SESION,
                                 token,
                                 key="set_epespo_auth_cookie",
-                                max_age=DURACION_SESION_SEGUNDOS,
-                                expires_at=datetime.now()
-                                + timedelta(
-                                    seconds=DURACION_SESION_SEGUNDOS
+                                max_age=(
+                                    DIAS_PERSISTENCIA_COOKIE * 24 * 60 * 60
                                 ),
+                                expires_at=datetime.now()
+                                + timedelta(days=DIAS_PERSISTENCIA_COOKIE),
                                 secure=_cookie_segura(),
                                 same_site="strict",
                             )
@@ -440,8 +422,9 @@ def cerrar_sesion():
             revocar_sesion_autenticacion(token)
         except (SQLAlchemyError, RuntimeError, ValueError) as error:
             st.session_state["_error_cierre_sesion"] = (
-                "No se pudo revocar la sesión en la base de datos; la cookie "
-                f"se eliminará y el token expirará en una hora. Detalle: {error}"
+                "No se pudo revocar la sesión en la base de datos. La cookie "
+                "se eliminará, pero la revocación del token requiere conexión "
+                f"con la base de datos. Detalle: {error}"
             )
 
     _limpiar_estado_sesion()
