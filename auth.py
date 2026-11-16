@@ -239,7 +239,7 @@ def render_login(cookie_manager=None):
                         st.session_state.usuario = usuario.strip().lower()
                         st.session_state.nombre = user_data["nombre"]
                         st.session_state.rol = user_data["rol"]
-                        return True
+                        st.rerun()
                     else:
                         st.error("Credenciales incorrectas. Verifique su usuario y contraseña.")
 
