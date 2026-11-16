@@ -93,6 +93,27 @@ def generar_excel_auditoria(df):
   return archivo.getvalue()
 
 
+@st.fragment
+def mostrar_botones_descarga_auditoria(df, nombre_archivo):
+  st.download_button(
+      "⬇️ Descargar CSV",
+      data=df.to_csv(index=False).encode("utf-8-sig"),
+      file_name=f"{nombre_archivo}.csv",
+      mime="text/csv",
+      type="primary",
+      use_container_width=True,
+      key="auditoria_boton_descarga_csv",
+  )
+  st.download_button(
+      "⬇️ Descargar Excel",
+      data=generar_excel_auditoria(df),
+      file_name=f"{nombre_archivo}.xlsx",
+      mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      use_container_width=True,
+      key="auditoria_boton_descarga_excel",
+  )
+
+
 def mascara_informacion_completa(df):
   valores_invalidos = {
       "",
@@ -1633,23 +1654,7 @@ with tab7:
       "completos": "dni_e_informacion_completa",
   }
   nombre_archivo = nombres_archivo[seleccion_descarga]
-  st.download_button(
-      "⬇️ Descargar CSV",
-      data=df_descarga.to_csv(index=False).encode("utf-8-sig"),
-      file_name=f"{nombre_archivo}.csv",
-      mime="text/csv",
-      type="primary",
-      use_container_width=True,
-      key="auditoria_boton_descarga_csv",
-  )
-  st.download_button(
-      "⬇️ Descargar Excel",
-      data=generar_excel_auditoria(df_descarga),
-      file_name=f"{nombre_archivo}.xlsx",
-      mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      use_container_width=True,
-      key="auditoria_boton_descarga_excel",
-  )
+  mostrar_botones_descarga_auditoria(df_descarga, nombre_archivo)
 
   st.markdown("#### Distribución del estado del DNI")
   df_estado_dni = (
