@@ -411,6 +411,7 @@ def render_login(cookie_manager):
                                 secure=_cookie_segura(),
                                 same_site="strict",
                             )
+                            return True
                     else:
                         st.error("Credenciales incorrectas. Verifique su usuario y contraseña.")
 

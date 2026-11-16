@@ -24,7 +24,12 @@ def _get_setting(name: str):
 def get_engine():
     database_url = _get_setting("DATABASE_URL")
     if database_url:
-        return create_engine(database_url, pool_pre_ping=True)
+        return create_engine(
+            database_url,
+            connect_args={"connect_timeout": 10},
+            pool_pre_ping=True,
+            pool_timeout=10,
+        )
 
     connection_name = _get_setting("INSTANCE_CONNECTION_NAME")
     db_name = _get_setting("DB_NAME")
@@ -62,8 +67,10 @@ def get_engine():
             user=db_user,
             password=db_password,
             host=socket_path,
+            connect_timeout=10,
         ),
         pool_pre_ping=True,
+        pool_timeout=10,
     )
 
 @st.cache_data(ttl=600)
