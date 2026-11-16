@@ -94,6 +94,48 @@ def generar_excel_auditoria(df):
   return archivo.getvalue()
 
 
+def mascara_informacion_completa(df):
+  valores_invalidos = {
+      "",
+      "nan",
+      "none",
+      "null",
+      "n/a",
+      "na",
+      "s/d",
+      "sin dato",
+      "sin especificar",
+      "sin registro",
+      "no registra",
+      "no registrado",
+      "no registrada",
+  }
+  campos_completos = {}
+  for columna in ["nombres", "matricula", "curso", "modalidad"]:
+    valores = (
+        df[columna]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .str.casefold()
+    )
+    valores_invalidos_campo = valores_invalidos.copy()
+    if columna == "nombres":
+      valores_invalidos_campo.add("sin nombre")
+    campos_completos[columna] = ~valores.isin(valores_invalidos_campo)
+
+  anio_valido = pd.to_numeric(df["anio"], errors="coerce").gt(0)
+  fecha_valida = pd.to_datetime(df["fecha"], errors="coerce").notna()
+  return (
+      df["estado_dni"].eq("Con DNI")
+      & campos_completos["nombres"]
+      & campos_completos["matricula"]
+      & campos_completos["curso"]
+      & campos_completos["modalidad"]
+      & (anio_valido | fecha_valida)
+  )
+
+
 # =============================================================
 # ESTILOS CSS GLOBALES INSTITUCIONALES
 # =============================================================
@@ -1485,49 +1527,12 @@ with tab7:
   sin_dni = int((df_auditoria["estado_dni"] == "Sin DNI").sum())
   dni_irregular = int((df_auditoria["estado_dni"] == "DNI irregular").sum())
   con_dni = int((df_auditoria["estado_dni"] == "Con DNI").sum())
-  campos_textuales_completos = {}
-  for columna in ["nombres", "matricula", "curso", "modalidad"]:
-    valores = (
-        df_auditoria[columna]
-        .fillna("")
-        .astype(str)
-        .str.strip()
-        .str.casefold()
-    )
-    valores_invalidos = {
-        "",
-        "nan",
-        "none",
-        "null",
-        "n/a",
-        "na",
-        "s/d",
-        "sin dato",
-        "sin especificar",
-        "sin registro",
-        "no registra",
-        "no registrado",
-        "no registrada",
-    }
-    if columna == "nombres":
-      valores_invalidos.add("sin nombre")
-    campos_textuales_completos[columna] = ~valores.isin(valores_invalidos)
-
-  anio_valido = pd.to_numeric(
-      df_auditoria["anio"], errors="coerce"
-  ).gt(0)
-  fecha_valida = pd.to_datetime(
-      df_auditoria["fecha"], errors="coerce"
-  ).notna()
-  mascara_info_completa = (
-      df_auditoria["estado_dni"].eq("Con DNI")
-      & campos_textuales_completos["nombres"]
-      & campos_textuales_completos["matricula"]
-      & campos_textuales_completos["curso"]
-      & campos_textuales_completos["modalidad"]
-      & (anio_valido | fecha_valida)
-  )
-  df_con_info_completa = df_auditoria[mascara_info_completa]
+  df_con_info_completa = df_auditoria[
+      mascara_informacion_completa(df_auditoria)
+  ]
+  df_con_info_completa_total = df_raw[
+      mascara_informacion_completa(df_raw)
+  ]
   ids_con_varios_registros = int(
       (
           df_auditoria.loc[
@@ -1576,7 +1581,7 @@ with tab7:
   if df_auditoria.empty:
     st.info(
         "Los filtros globales no encontraron registros. Selecciona "
-        "«Toda la base de datos» para ver los gráficos y descargar información."
+        "«Toda la base de datos» para ver los gráficos."
     )
 
   st.markdown("#### Distribución del estado del DNI")
@@ -1606,15 +1611,19 @@ with tab7:
   )
 
   st.markdown("#### Descargar registros")
+  st.caption(
+      "Las descargas usan toda la base de datos, independientemente de los "
+      "filtros aplicados al tablero."
+  )
   opciones_descarga = {
-      "todos": ("Todos los registros", df_auditoria),
+      "todos": ("Todos los registros", df_raw),
       "sin_dni": (
           "Registros sin DNI",
-          df_auditoria[df_auditoria["estado_dni"] == "Sin DNI"],
+          df_raw[df_raw["estado_dni"] == "Sin DNI"],
       ),
       "completos": (
           "DNI e información completa",
-          df_con_info_completa,
+          df_con_info_completa_total,
       ),
   }
   if (
@@ -1637,36 +1646,46 @@ with tab7:
     df_descarga[columna] = df_seleccionado[columna]
 
   if df_descarga.empty:
-    st.info("El conjunto seleccionado no contiene registros para descargar.")
+    st.info(
+        "El conjunto seleccionado no contiene registros; el archivo se "
+        "descargará con los encabezados de las columnas."
+    )
+  st.caption(
+      f"Archivo seleccionado: {len(df_descarga):,} registros, "
+      f"{len(df_descarga.columns):,} columnas."
+  )
+  nombres_archivo = {
+      "todos": "todos_los_registros",
+      "sin_dni": "registros_sin_dni",
+      "completos": "dni_e_informacion_completa",
+  }
+  nombre_archivo = nombres_archivo[seleccion_descarga]
+  formato_descarga = st.radio(
+      "Formato del archivo:",
+      ["Excel (.xlsx)", "CSV (.csv)"],
+      horizontal=True,
+      key="auditoria_formato_descarga",
+  )
+  if formato_descarga == "Excel (.xlsx)":
+    datos_descarga = generar_excel_auditoria(df_descarga)
+    extension = "xlsx"
+    mime_descarga = (
+        "application/vnd.openxmlformats-officedocument."
+        "spreadsheetml.sheet"
+    )
   else:
-    st.caption(
-        f"Se descargarán {len(df_descarga):,} registros y "
-        f"{len(df_descarga.columns):,} columnas."
-    )
-    archivo_excel = generar_excel_auditoria(df_descarga)
-    nombres_archivo = {
-        "todos": "todos_los_registros",
-        "sin_dni": "registros_sin_dni",
-        "completos": "dni_e_informacion_completa",
-    }
-    nombre_archivo = nombres_archivo[seleccion_descarga]
-    col_descarga_excel, col_descarga_csv = st.columns(2)
-    col_descarga_excel.download_button(
-        "Descargar Excel",
-        data=archivo_excel,
-        file_name=f"{nombre_archivo}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
-        key="auditoria_descarga_excel",
-    )
-    col_descarga_csv.download_button(
-        "Descargar CSV",
-        data=df_descarga.to_csv(index=False).encode("utf-8-sig"),
-        file_name=f"{nombre_archivo}.csv",
-        mime="text/csv",
-        use_container_width=True,
-        key="auditoria_descarga_csv",
-    )
+    datos_descarga = df_descarga.to_csv(index=False).encode("utf-8-sig")
+    extension = "csv"
+    mime_descarga = "text/csv"
+  st.download_button(
+      f"⬇️ Descargar archivo {extension.upper()}",
+      data=datos_descarga,
+      file_name=f"{nombre_archivo}.{extension}",
+      mime=mime_descarga,
+      type="primary",
+      use_container_width=True,
+      key="auditoria_boton_descarga",
+  )
 
   if not df_auditoria.empty:
     df_auditoria_curso = (
