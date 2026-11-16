@@ -78,16 +78,6 @@ st.markdown(
     }
     .hero-title { font-size: 24px; font-weight: 800; margin: 0; color: #FFFFFF; }
     .hero-subtitle { font-size: 13.5px; color: #D1E4FF; margin-top: 4px; margin-bottom: 0; }
-    .hero-badge {
-        background: rgba(255, 255, 255, 0.15);
-        border: 1px solid rgba(255, 255, 255, 0.25);
-        padding: 5px 12px;
-        border-radius: 20px;
-        font-size: 11.5px;
-        font-weight: 700;
-        color: #FFFFFF;
-    }
-
     .kpi-container {
         display: grid;
         grid-template-columns: repeat(4, 1fr);
@@ -489,7 +479,6 @@ st.markdown(
             <h1 class="hero-title">⚓ ESCUELA DE PESCA DEL PACÍFICO ORIENTAL (EPESPO)</h1>
             <p class="hero-subtitle">Plataforma de Inteligencia Analítica Marítima, Control de Flota y Gestión de Titulaciones</p>
         </div>
-        <div class="hero-badge">SISTEMA OFICIAL DIRNEA</div>
     </div>
 """,
     unsafe_allow_html=True,
