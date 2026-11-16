@@ -144,23 +144,24 @@ def actualizar_registros_ciudadano(
         "impresion",
     )
     columnas_personales = {"cedula", "nombres", "matricula"}
-    if not columnas_personales.issubset(registro_original) or not (
-        columnas_personales.issubset(datos_nuevos)
-    ):
-        raise ValueError("Faltan campos personales para actualizar el registro.")
-    columnas = tuple(
+    columnas_snapshot = tuple(
         columna
         for columna in columnas_disponibles
-        if columna in registro_original and columna in datos_nuevos
+        if columna in registro_original
     )
+    columnas = tuple(
+        columna for columna in columnas_snapshot if columna in datos_nuevos
+    )
+    if not columnas_snapshot or not columnas:
+        raise ValueError("No hay campos válidos para actualizar el registro.")
 
     snapshot_sql = " AND ".join(
         f"{columna} IS NOT DISTINCT FROM :original_{columna}"
-        for columna in columnas
+        for columna in columnas_snapshot
     )
     parametros = {
         f"original_{columna}": _valor_sql(registro_original[columna])
-        for columna in columnas
+        for columna in columnas_snapshot
     }
 
     if dni_anterior:

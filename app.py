@@ -316,7 +316,7 @@ def convertir_fecha_formulario(valor, campo):
   fecha = pd.to_datetime(valor, format="%Y-%m-%d", errors="coerce")
   if pd.isna(fecha):
     raise ValueError(f"{campo} debe tener el formato AAAA-MM-DD.")
-  return fecha.date()
+  return fecha.strftime("%Y-%m-%d")
 
 
 def clasificar_dni(val):
@@ -623,6 +623,7 @@ with st.sidebar.expander("🔍 Búsqueda de Ciudadano", expanded=False):
         campos_enteros = {"anio", "mes", "impresion"}
         campos_fecha = {"fecha", "fec_ini", "fec_fin"}
         valores_formulario = {}
+        valores_iniciales = {}
 
         with st.form(f"form_editar_ciudadano_{indice_registro}"):
           columna_personal, columna_academica = st.columns(2)
@@ -641,6 +642,7 @@ with st.sidebar.expander("🔍 Búsqueda de Ciudadano", expanded=False):
             else:
               valor_inicial = texto_celda(fila_original.get(campo))
             with contenedor:
+              valores_iniciales[campo] = valor_inicial
               valores_formulario[campo] = st.text_input(
                   etiquetas_campos[campo],
                   value=valor_inicial,
@@ -666,6 +668,8 @@ with st.sidebar.expander("🔍 Búsqueda de Ciudadano", expanded=False):
             try:
               datos_nuevos = {}
               for campo, valor in valores_formulario.items():
+                if valor == valores_iniciales[campo]:
+                  continue
                 if campo in campos_enteros:
                   datos_nuevos[campo] = convertir_entero_formulario(
                       valor,
@@ -682,27 +686,29 @@ with st.sidebar.expander("🔍 Búsqueda de Ciudadano", expanded=False):
               mes_parseado = datos_nuevos.get("mes")
               if mes_parseado is not None and not 0 <= mes_parseado <= 12:
                 raise ValueError("Mes debe estar entre 0 y 12.")
-              registro_original = fila_original[campos_registro].to_dict()
-              registros_actualizados = actualizar_registros_ciudadano(
-                  dni_anterior,
-                  texto_celda(fila_original.get("nombres")),
-                  texto_celda(fila_original.get("matricula")),
-                  registro_original,
-                  datos_nuevos,
-              )
+              if not datos_nuevos:
+                st.info("No se detectaron cambios para guardar.")
+              else:
+                registro_original = fila_original[campos_registro].to_dict()
+                registros_actualizados = actualizar_registros_ciudadano(
+                    dni_anterior,
+                    texto_celda(fila_original.get("nombres")),
+                    texto_celda(fila_original.get("matricula")),
+                    registro_original,
+                    datos_nuevos,
+                )
+                if registros_actualizados:
+                  st.session_state["mensaje_edicion_ciudadano"] = (
+                      f"Se actualizaron {registros_actualizados} registro(s) "
+                      "existentes; no se insertaron filas."
+                  )
+                  st.rerun()
+                else:
+                  st.error("No se encontró ningún registro para actualizar.")
             except ValueError as error:
               st.error(str(error))
             except SQLAlchemyError as error:
               st.error(f"No se pudieron actualizar los registros: {error}")
-            else:
-              if registros_actualizados:
-                st.session_state["mensaje_edicion_ciudadano"] = (
-                    f"Se actualizaron {registros_actualizados} registro(s) "
-                    "existentes; no se insertaron filas."
-                )
-                st.rerun()
-              else:
-                st.error("No se encontró ningún registro para actualizar.")
 
   if st.session_state.get("mensaje_edicion_ciudadano"):
     st.success(st.session_state.pop("mensaje_edicion_ciudadano"))
