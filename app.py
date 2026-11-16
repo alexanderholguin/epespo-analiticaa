@@ -1650,17 +1650,18 @@ with tab7:
       "Las descargas usan toda la base de datos, independientemente de los "
       "filtros aplicados al tablero."
   )
-  opciones_descarga = {
-      "todos": ("Todos los registros", df_raw),
-      "sin_dni": (
-          "Registros sin DNI",
-          df_raw[df_raw["estado_dni"] == "Sin DNI"],
-      ),
-      "completos": (
-          "DNI e información completa",
-          df_con_info_completa_total,
-      ),
+
+  # CORRECCIÓN DEFINITIVA DE LOS SUBJUNTO DE EXPORTACIÓN
+  df_todos_export = df_raw.copy()
+  df_sin_dni_export = df_raw[df_raw["estado_dni"] == "Sin DNI"].copy()
+  df_completos_export = df_raw[mascara_informacion_completa(df_raw)].copy()
+
+  opciones_descarga_bruta = {
+      "todos": ("Todos los registros", df_todos_export),
+      "sin_dni": ("Registros sin DNI", df_sin_dni_export),
+      "completos": ("DNI e información completa", df_completos_export),
   }
+
   opciones_descarga = {
       clave: (
           titulo,
@@ -1669,7 +1670,7 @@ with tab7:
               estado_dni=datos["estado_dni"],
           ),
       )
-      for clave, (titulo, datos) in opciones_descarga.items()
+      for clave, (titulo, datos) in opciones_descarga_bruta.items()
   }
   mostrar_botones_descarga_auditoria(opciones_descarga)
 
