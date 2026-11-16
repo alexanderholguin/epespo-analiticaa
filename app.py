@@ -1104,58 +1104,69 @@ with tab7:
           f"({len(df_con_info_completa):,})"
       ): df_con_info_completa,
   }
-  seleccion_descarga = st.selectbox(
-      "Conjunto de datos:",
-      options=list(opciones_descarga),
-      key="auditoria_conjunto_descarga",
-  )
-  df_descarga = opciones_descarga[seleccion_descarga]
-  columnas_descarga = [
-      columna
-      for columna in [
-          "cedula",
-          "nombres",
-          "matricula",
-          "anio",
-          "mes",
-          "fecha",
-          "fec_ini",
-          "fec_fin",
-          "curso",
-          "modalidad",
-          "provincia",
-          "condicion",
-          "impresion",
-          "estado_dni",
-      ]
-      if columna in df_descarga.columns
-  ]
-  df_descarga = df_descarga[columnas_descarga]
-  archivo_excel = BytesIO()
-  with pd.ExcelWriter(archivo_excel, engine="openpyxl") as escritor:
-    df_descarga.to_excel(escritor, index=False, sheet_name="Registros")
-  nombre_archivo = (
-      seleccion_descarga.split(" (")[0]
-      .lower()
-      .replace(" ", "_")
-      .replace("ó", "o")
-      .replace("í", "i")
-  )
-  col_descarga_excel, col_descarga_csv = st.columns(2)
-  col_descarga_excel.download_button(
-      "Descargar Excel",
-      data=archivo_excel.getvalue(),
-      file_name=f"{nombre_archivo}.xlsx",
-      mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      use_container_width=True,
-  )
-  col_descarga_csv.download_button(
-      "Descargar CSV",
-      data=df_descarga.to_csv(index=False).encode("utf-8-sig"),
-      file_name=f"{nombre_archivo}.csv",
-      mime="text/csv",
-      use_container_width=True,
-  )
+  with st.form("form_seleccionar_descarga_dni"):
+    seleccion_descarga = st.selectbox(
+        "Conjunto de datos:",
+        options=list(opciones_descarga),
+        key="auditoria_conjunto_descarga",
+    )
+    preparar_descarga = st.form_submit_button(
+        "Preparar descarga",
+        use_container_width=True,
+    )
+
+  if preparar_descarga:
+    st.session_state["auditoria_descarga_preparada"] = seleccion_descarga
+
+  seleccion_preparada = st.session_state.get("auditoria_descarga_preparada")
+  if seleccion_preparada in opciones_descarga:
+    df_descarga = opciones_descarga[seleccion_preparada]
+    columnas_descarga = [
+        columna
+        for columna in [
+            "cedula",
+            "nombres",
+            "matricula",
+            "anio",
+            "mes",
+            "fecha",
+            "fec_ini",
+            "fec_fin",
+            "curso",
+            "modalidad",
+            "provincia",
+            "condicion",
+            "impresion",
+            "estado_dni",
+        ]
+        if columna in df_descarga.columns
+    ]
+    df_descarga = df_descarga[columnas_descarga]
+    archivo_excel = BytesIO()
+    with pd.ExcelWriter(archivo_excel, engine="openpyxl") as escritor:
+      df_descarga.to_excel(escritor, index=False, sheet_name="Registros")
+    nombre_archivo = (
+        seleccion_preparada.split(" (")[0]
+        .lower()
+        .replace(" ", "_")
+        .replace("ó", "o")
+        .replace("í", "i")
+    )
+    col_descarga_excel, col_descarga_csv = st.columns(2)
+    col_descarga_excel.download_button(
+        "Descargar Excel",
+        data=archivo_excel.getvalue(),
+        file_name=f"{nombre_archivo}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+    )
+    col_descarga_csv.download_button(
+        "Descargar CSV",
+        data=df_descarga.to_csv(index=False).encode("utf-8-sig"),
+        file_name=f"{nombre_archivo}.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
 
   if not df_f.empty:
     df_auditoria_curso = (
