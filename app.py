@@ -86,7 +86,6 @@ def cargar_datos_completos():
     st.stop()
 
 
-@st.cache_data(show_spinner=False)
 def generar_excel_auditoria(df):
   archivo = BytesIO()
   with pd.ExcelWriter(archivo, engine="openpyxl") as escritor:
@@ -1584,32 +1583,6 @@ with tab7:
         "«Toda la base de datos» para ver los gráficos."
     )
 
-  st.markdown("#### Distribución del estado del DNI")
-  df_estado_dni = (
-      df_auditoria["estado_dni"]
-      .value_counts()
-      .reindex(["Con DNI", "DNI irregular", "Sin DNI"], fill_value=0)
-      .rename_axis("Estado del DNI")
-      .reset_index(name="Registros")
-  )
-  fig_estado_dni = px.bar(
-      df_estado_dni,
-      x="Estado del DNI",
-      y="Registros",
-      color="Estado del DNI",
-      text="Registros",
-      title="Registros según estado del DNI",
-      category_orders={
-          "Estado del DNI": ["Con DNI", "DNI irregular", "Sin DNI"]
-      },
-  )
-  fig_estado_dni.update_layout(showlegend=False)
-  st.plotly_chart(
-      fig_estado_dni,
-      use_container_width=True,
-      key="auditoria_grafico_estado_dni",
-  )
-
   st.markdown("#### Descargar registros")
   st.caption(
       "Las descargas usan toda la base de datos, independientemente de los "
@@ -1660,31 +1633,48 @@ with tab7:
       "completos": "dni_e_informacion_completa",
   }
   nombre_archivo = nombres_archivo[seleccion_descarga]
-  formato_descarga = st.radio(
-      "Formato del archivo:",
-      ["Excel (.xlsx)", "CSV (.csv)"],
-      horizontal=True,
-      key="auditoria_formato_descarga",
-  )
-  if formato_descarga == "Excel (.xlsx)":
-    datos_descarga = generar_excel_auditoria(df_descarga)
-    extension = "xlsx"
-    mime_descarga = (
-        "application/vnd.openxmlformats-officedocument."
-        "spreadsheetml.sheet"
-    )
-  else:
-    datos_descarga = df_descarga.to_csv(index=False).encode("utf-8-sig")
-    extension = "csv"
-    mime_descarga = "text/csv"
   st.download_button(
-      f"⬇️ Descargar archivo {extension.upper()}",
-      data=datos_descarga,
-      file_name=f"{nombre_archivo}.{extension}",
-      mime=mime_descarga,
+      "⬇️ Descargar CSV",
+      data=df_descarga.to_csv(index=False).encode("utf-8-sig"),
+      file_name=f"{nombre_archivo}.csv",
+      mime="text/csv",
       type="primary",
       use_container_width=True,
-      key="auditoria_boton_descarga",
+      key="auditoria_boton_descarga_csv",
+  )
+  st.download_button(
+      "⬇️ Descargar Excel",
+      data=generar_excel_auditoria(df_descarga),
+      file_name=f"{nombre_archivo}.xlsx",
+      mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      use_container_width=True,
+      key="auditoria_boton_descarga_excel",
+  )
+
+  st.markdown("#### Distribución del estado del DNI")
+  df_estado_dni = (
+      df_auditoria["estado_dni"]
+      .value_counts()
+      .reindex(["Con DNI", "DNI irregular", "Sin DNI"], fill_value=0)
+      .rename_axis("Estado del DNI")
+      .reset_index(name="Registros")
+  )
+  fig_estado_dni = px.bar(
+      df_estado_dni,
+      x="Estado del DNI",
+      y="Registros",
+      color="Estado del DNI",
+      text="Registros",
+      title="Registros según estado del DNI",
+      category_orders={
+          "Estado del DNI": ["Con DNI", "DNI irregular", "Sin DNI"]
+      },
+  )
+  fig_estado_dni.update_layout(showlegend=False)
+  st.plotly_chart(
+      fig_estado_dni,
+      use_container_width=True,
+      key="auditoria_grafico_estado_dni",
   )
 
   if not df_auditoria.empty:
