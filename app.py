@@ -260,8 +260,23 @@ st.markdown(
     .badge-rose { background: #FFF1F2; color: #BE123C; }
     .badge-blue { background: #EFF6FF; color: #1D4ED8; }
 
-    .stTabs [data-baseweb="tab-list"] { background: #E7EEF7; border-radius: 13px; padding: 6px; gap: 4px; }
-    .stTabs [data-baseweb="tab"] { border-radius: 9px; padding: 10px 14px; color: #46627F; font-weight: 600; }
+    /* Permitir desplazamiento horizontal fluido en la lista de pestañas */
+    .stTabs [data-baseweb="tab-list"] { 
+        background: #E7EEF7; 
+        border-radius: 13px; 
+        padding: 6px; 
+        gap: 4px; 
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        scrollbar-width: thin;
+    }
+    .stTabs [data-baseweb="tab"] { 
+        border-radius: 9px; 
+        padding: 10px 14px; 
+        color: #46627F; 
+        font-weight: 600; 
+        white-space: nowrap;
+    }
     .stTabs [data-baseweb="tab"][aria-selected="true"] { background: #FFFFFF !important; color: #0759B8 !important; box-shadow: 0 2px 8px rgba(15,54,102,.08); }
     
     div[data-testid="stPlotlyChart"] { background: #FFFFFF; border: 1px solid #E4EBF4; border-radius: 15px; padding: 7px; box-shadow: 0 3px 12px rgba(15,54,102,.025); }
@@ -1060,7 +1075,7 @@ st.markdown(
 )
 
 # =============================================================
-# PESTAÑAS DE NAVEGACIÓN ANALÍTICA (CON LA NUEVA SECCIÓN)
+# PESTAÑAS DE NAVEGACIÓN ANALÍTICA (10 PESTAÑAS)
 # =============================================================
 tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
     "📈 Evolución Histórica",
@@ -1809,7 +1824,7 @@ with tab7:
   else:
     st.info("No hay registros con los filtros seleccionados.")
 
-  # Bloque de Descargas al final de la auditoría
+  # Bloque de descargas ubicado al final de la sección
   st.markdown("---")
   st.markdown("#### 📥 Descarga de Registros por Rango de Años y Mes")
   st.caption("Filtra por periodo específico para mantener las descargas ligeras y rápidas.")
@@ -1990,7 +2005,6 @@ with tab10:
       "4. **Patrón de Altura ➡️ Capitán:** Mínimo 3 años."
   )
 
-  # Filtro por DNI para buscar la trayectoria individual de un marino
   df_con_dni_valido = df_raw[df_raw["estado_dni"] == "Con DNI"].copy()
   if not df_con_dni_valido.empty:
     cedulas_disponibles = sorted(df_con_dni_valido["cedula_limpia"].unique().tolist())
@@ -2006,14 +2020,12 @@ with tab10:
 
       st.markdown(f"### Expediente del Marino: **{nombre_marino}** (Cédula: {dni_seleccionado})")
       
-      # Mostrar tabla con los cursos y años registrados por el marino
       st.dataframe(
           df_marino[["curso", "anio", "mes", "condicion", "provincia", "modalidad"]],
           use_container_width=True,
           hide_index=True
       )
 
-      # Lógica de evaluación de tiempos entre titulaciones
       anios_titulacion = df_marino["anio"].tolist()
       cursos_titulacion = df_marino["curso"].tolist()
 
@@ -2028,6 +2040,6 @@ with tab10:
 
           st.write(f"• De **{curso_previo}** ({anio_previo}) a **{curso_actual}** ({anio_actual}): **{diferencia_anios} año(s) de diferencia**.")
       else:
-        st.warning("El marino cuenta con un solo registro histórico en la base de datos. Se requiere registrar su progresión en múltiples niveles para calcular los intervalos de ascenso.")
+        st.warning("El marino cuenta con un solo registro histórico en la base de datos.")
   else:
     st.info("No se encontraron registros con DNI válido para procesar el simulador de escalafón.")

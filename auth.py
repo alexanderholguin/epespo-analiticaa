@@ -1,23 +1,8 @@
-from datetime import datetime, timedelta
-import os
-import secrets
-
-import extra_streamlit_components as stx
 import streamlit as st
-from sqlalchemy.exc import SQLAlchemyError
-
-from db import (
-    guardar_sesion_autenticacion,
-    obtener_sesion_autenticacion,
-    revocar_sesion_autenticacion,
-)
-
 
 # ============================================================
-# EPESPO - SISTEMA DE AUTENTICACIÓN INSTITUCIONAL
+# EPESPO - SISTEMA DE AUTENTICACIÓN INSTITUCIONAL (SIN COOKIES)
 # ============================================================
-
-COOKIE_SESION = "epespo_session"
 
 USUARIOS_PERMITIDOS = {
     "admin_epespo": {
@@ -34,85 +19,9 @@ USUARIOS_PERMITIDOS = {
 
 
 def crear_gestor_cookies():
-    return stx.CookieManager(key="epespo_auth_cookie_manager")
+    # Retornamos None ya que no utilizaremos cookies persistentes
+    return None
 
-
-def _crear_token_sesion(usuario):
-    token = secrets.token_urlsafe(32)
-    guardar_sesion_autenticacion(token, usuario)
-    return token
-
-
-def _sesion_desde_token(token):
-    if not isinstance(token, str):
-        return None
-
-    usuario = obtener_sesion_autenticacion(token)
-    if usuario is None:
-        return None
-
-    if usuario not in USUARIOS_PERMITIDOS:
-        revocar_sesion_autenticacion(token)
-        return None
-    return usuario
-
-
-def _datos_usuario(usuario):
-    datos = USUARIOS_PERMITIDOS.get(usuario)
-    if not datos:
-        return None
-    return {
-        "nombre": str(datos.get("name", usuario)),
-        "rol": str(datos.get("role", "")),
-    }
-
-
-def _establecer_sesion(usuario, token):
-    datos = _datos_usuario(usuario)
-    if not datos:
-        return False
-    st.session_state.autenticado = True
-    st.session_state.usuario = usuario
-    st.session_state.nombre = datos["nombre"]
-    st.session_state.rol = datos["rol"]
-    st.session_state["_token_sesion"] = token
-    return True
-
-
-def _limpiar_estado_sesion():
-    for clave in (
-        "autenticado",
-        "usuario",
-        "nombre",
-        "rol",
-        "_token_sesion",
-        "login_usuario",
-        "login_password",
-    ):
-        st.session_state.pop(clave, None)
-
-
-def _eliminar_cookie_sesion(cookie_manager):
-    if cookie_manager.get(cookie=COOKIE_SESION) is not None:
-        cookie_manager.delete(
-            COOKIE_SESION,
-            key="delete_epespo_auth_cookie",
-        )
-
-
-def _cookie_segura():
-    predeterminado = "true" if os.environ.get("K_SERVICE") else "false"
-    valor = os.environ.get("AUTH_COOKIE_SECURE", predeterminado)
-    return valor.strip().lower() in {"1", "true", "yes"}
-
-
-def _error_persistencia_sesion(error):
-    st.error(f"No se pudo validar o guardar la sesión en la base de datos: {error}")
-
-
-# ============================================================
-# 1. VERIFICACIÓN DE CREDENCIALES
-# ============================================================
 
 def verificar_credenciales(usuario, password):
     usuario = usuario.strip().lower()
@@ -122,11 +31,16 @@ def verificar_credenciales(usuario, password):
         return None
 
     datos = USUARIOS_PERMITIDOS[usuario]
-    return _datos_usuario(usuario) if password == datos["password"] else None
+    if password == datos["password"]:
+        return {
+            "nombre": str(datos.get("name", usuario)),
+            "rol": str(datos.get("role", "")),
+        }
+    return None
 
 
 # ============================================================
-# 2. ESTILOS DEL LOGIN
+# ESTILOS DEL LOGIN
 # ============================================================
 
 def aplicar_estilos_login():
@@ -270,45 +184,12 @@ def aplicar_estilos_login():
 
 
 # ============================================================
-# 3. PANTALLA DE INICIO DE SESIÓN
+# PANTALLA DE INICIO DE SESIÓN
 # ============================================================
 
-def render_login(cookie_manager):
-    if st.session_state.pop("_cerrar_sesion_pendiente", False):
-        _eliminar_cookie_sesion(cookie_manager)
-        error_cierre = st.session_state.pop("_error_cierre_sesion", None)
-        if error_cierre:
-            st.warning(error_cierre)
-
+def render_login(cookie_manager=None):
     if st.session_state.get("autenticado"):
-        token = st.session_state.get("_token_sesion")
-        usuario = st.session_state.get("usuario")
-        if token and usuario in USUARIOS_PERMITIDOS:
-            _establecer_sesion(usuario, token)
-            return True
-        if token:
-            try:
-                revocar_sesion_autenticacion(token)
-            except (SQLAlchemyError, RuntimeError, ValueError) as error:
-                _error_persistencia_sesion(error)
-                st.stop()
-        _limpiar_estado_sesion()
-        _eliminar_cookie_sesion(cookie_manager)
-
-    token_cookie = cookie_manager.get(cookie=COOKIE_SESION)
-    try:
-        usuario_cookie = _sesion_desde_token(token_cookie)
-    except (SQLAlchemyError, RuntimeError, ValueError) as error:
-        _error_persistencia_sesion(error)
-        st.stop()
-    if usuario_cookie:
-        if _establecer_sesion(
-            usuario_cookie,
-            token_cookie,
-        ):
-            return True
-    if token_cookie is not None:
-        _eliminar_cookie_sesion(cookie_manager)
+        return True
 
     aplicar_estilos_login()
 
@@ -351,37 +232,14 @@ def render_login(cookie_manager):
                 if not usuario.strip() or not password:
                     st.warning("Por favor, ingrese su usuario y contraseña.")
                 else:
-                    usuario_normalizado = usuario.strip().lower()
-                    user_data = verificar_credenciales(usuario_normalizado, password)
+                    user_data = verificar_credenciales(usuario, password)
 
                     if user_data:
-                        try:
-                            token = _crear_token_sesion(usuario_normalizado)
-                        except (
-                            SQLAlchemyError,
-                            RuntimeError,
-                            ValueError,
-                        ) as error:
-                            _error_persistencia_sesion(error)
-                        else:
-                            st.session_state.autenticado = True
-                            st.session_state.usuario = usuario_normalizado
-                            st.session_state.nombre = user_data["nombre"]
-                            st.session_state.rol = user_data["rol"]
-                            _establecer_sesion(
-                                usuario_normalizado,
-                                token,
-                            )
-                            # COOKIE DE SESIÓN PURA (SIN max_age NI expires_at)
-                            # Se destruye automáticamente al cerrar el navegador
-                            cookie_manager.set(
-                                COOKIE_SESION,
-                                token,
-                                key="set_epespo_auth_cookie",
-                                secure=_cookie_segura(),
-                                same_site="strict",
-                            )
-                            return True
+                        st.session_state.autenticado = True
+                        st.session_state.usuario = usuario.strip().lower()
+                        st.session_state.nombre = user_data["nombre"]
+                        st.session_state.rol = user_data["rol"]
+                        return True
                     else:
                         st.error("Credenciales incorrectas. Verifique su usuario y contraseña.")
 
@@ -400,20 +258,16 @@ def render_login(cookie_manager):
 
 
 # ============================================================
-# 4. CERRAR SESIÓN
+# CERRAR SESIÓN
 # ============================================================
 
 def cerrar_sesion():
-    token = st.session_state.get("_token_sesion")
-    if token:
-        try:
-            revocar_sesion_autenticacion(token)
-        except (SQLAlchemyError, RuntimeError, ValueError) as error:
-            st.session_state["_error_cierre_sesion"] = (
-                "No se pudo revocar la sesión en la base de datos. La cookie "
-                "se eliminará, pero la revocación del token requiere conexión "
-                f"con la base de datos. Detalle: {error}"
-            )
-
-    _limpiar_estado_sesion()
-    st.session_state["_cerrar_sesion_pendiente"] = True
+    for clave in (
+        "autenticado",
+        "usuario",
+        "nombre",
+        "rol",
+        "login_usuario",
+        "login_password",
+    ):
+        st.session_state.pop(clave, None)
