@@ -447,6 +447,14 @@ st.sidebar.markdown(
     unsafe_allow_html=True,
 )
 
+
+def limpiar_busqueda_ciudadano():
+  st.session_state["search_dni_side"] = ""
+  st.session_state["search_ape_side"] = ""
+
+
+resultados_principales = st.container()
+
 with st.sidebar.expander("🔍 Búsqueda de Ciudadano", expanded=False):
   dni_sidebar = st.text_input(
       "Cédula / DNI:", placeholder="Ej: 1306296409", key="search_dni_side"
@@ -455,12 +463,14 @@ with st.sidebar.expander("🔍 Búsqueda de Ciudadano", expanded=False):
       "O por Apellidos:", placeholder="Ej: RODRIGUEZ", key="search_ape_side"
   )
   if dni_sidebar or ape_sidebar:
-    if st.button("✖️ Limpiar Búsqueda", use_container_width=True):
-      st.session_state["search_dni_side"] = ""
-      st.session_state["search_ape_side"] = ""
-      st.rerun()
+    st.button(
+        "✖️ Limpiar Búsqueda",
+        on_click=limpiar_busqueda_ciudadano,
+        use_container_width=True,
+    )
 
   if dni_sidebar or ape_sidebar:
+    resultados_principales.subheader("Resultado de búsqueda")
     coincidencias = df_raw.copy()
     if dni_sidebar:
       busqueda_dni = "".join(
@@ -481,9 +491,13 @@ with st.sidebar.expander("🔍 Búsqueda de Ciudadano", expanded=False):
           .str.contains(ape_sidebar.strip(), case=False, na=False, regex=False)
       ]
 
-    st.caption(f"Coincidencias encontradas: {len(coincidencias):,} registros")
+    resultados_principales.caption(
+        f"Coincidencias encontradas: {len(coincidencias):,} registros"
+    )
     if coincidencias.empty:
-      st.info("No se encontraron ciudadanos con esos datos.")
+      resultados_principales.info(
+          "No se encontraron ciudadanos con esos datos."
+      )
     else:
       grupos_persona = {}
       for _, fila in coincidencias.iterrows():
@@ -516,7 +530,7 @@ with st.sidebar.expander("🔍 Búsqueda de Ciudadano", expanded=False):
             f"{len(filas)} registro(s) · Resultado {indice + 1}"
         )
 
-      indice_persona = st.selectbox(
+      indice_persona = resultados_principales.selectbox(
           "Ciudadano encontrado:",
           options=range(len(claves_persona)),
           format_func=etiqueta_persona,
@@ -536,14 +550,16 @@ with st.sidebar.expander("🔍 Búsqueda de Ciudadano", expanded=False):
           ]
           if columna in registros_persona.columns
       ]
-      st.dataframe(
+      resultados_principales.dataframe(
           registros_persona[columnas_resumen].drop_duplicates(),
           use_container_width=True,
           hide_index=True,
       )
 
       if st.session_state.get("rol") != "admin":
-        st.info("Solo un usuario administrador puede editar ciudadanos.")
+        resultados_principales.info(
+            "Solo un usuario administrador puede editar ciudadanos."
+        )
       else:
         def etiqueta_registro(indice):
           registro = registros_persona.loc[indice]
@@ -553,7 +569,7 @@ with st.sidebar.expander("🔍 Búsqueda de Ciudadano", expanded=False):
               f"{texto_fecha(df_original.loc[indice].get('fecha')) or 'Sin fecha'}"
           )
 
-        indice_registro = st.selectbox(
+        indice_registro = resultados_principales.selectbox(
             "Registro a editar:",
             options=registros_persona.index.tolist(),
             format_func=etiqueta_registro,
@@ -585,13 +601,13 @@ with st.sidebar.expander("🔍 Búsqueda de Ciudadano", expanded=False):
             or bool(clave_seleccionada[1] and clave_seleccionada[2])
         )
         if not identidad_segura:
-          st.info(
+          resultados_principales.info(
               "No hay datos suficientes para agrupar a esta persona. Se "
               "actualizará solo el registro seleccionado, identificado por "
               "sus valores actuales; no se crearán filas nuevas."
           )
         else:
-          st.caption(
+          resultados_principales.caption(
               "Cédula, nombres y matrícula se actualizan en todos los "
               "registros vinculados. Los demás campos solo cambian en el "
               "registro seleccionado."
@@ -625,7 +641,9 @@ with st.sidebar.expander("🔍 Búsqueda de Ciudadano", expanded=False):
         valores_formulario = {}
         valores_iniciales = {}
 
-        with st.form(f"form_editar_ciudadano_{indice_registro}"):
+        with resultados_principales.form(
+            f"form_editar_ciudadano_{indice_registro}"
+        ):
           columna_personal, columna_academica = st.columns(2)
           for campo in campos_registro:
             contenedor = (
@@ -658,7 +676,9 @@ with st.sidebar.expander("🔍 Búsqueda de Ciudadano", expanded=False):
           if dni_nuevo and dni_nuevo != dni_actual and (
               not dni_nuevo.isdigit() or len(dni_nuevo) != 10
           ):
-            st.error("La cédula debe tener exactamente 10 dígitos.")
+            resultados_principales.error(
+                "La cédula debe tener exactamente 10 dígitos."
+            )
           else:
             dni_anterior = (
                 clave_seleccionada[1]
@@ -687,7 +707,9 @@ with st.sidebar.expander("🔍 Búsqueda de Ciudadano", expanded=False):
               if mes_parseado is not None and not 0 <= mes_parseado <= 12:
                 raise ValueError("Mes debe estar entre 0 y 12.")
               if not datos_nuevos:
-                st.info("No se detectaron cambios para guardar.")
+                resultados_principales.info(
+                    "No se detectaron cambios para guardar."
+                )
               else:
                 registro_original = fila_original[campos_registro].to_dict()
                 registros_actualizados = actualizar_registros_ciudadano(
@@ -704,14 +726,20 @@ with st.sidebar.expander("🔍 Búsqueda de Ciudadano", expanded=False):
                   )
                   st.rerun()
                 else:
-                  st.error("No se encontró ningún registro para actualizar.")
+                  resultados_principales.error(
+                      "No se encontró ningún registro para actualizar."
+                  )
             except ValueError as error:
-              st.error(str(error))
+              resultados_principales.error(str(error))
             except SQLAlchemyError as error:
-              st.error(f"No se pudieron actualizar los registros: {error}")
+              resultados_principales.error(
+                  f"No se pudieron actualizar los registros: {error}"
+              )
 
   if st.session_state.get("mensaje_edicion_ciudadano"):
-    st.success(st.session_state.pop("mensaje_edicion_ciudadano"))
+    resultados_principales.success(
+        st.session_state.pop("mensaje_edicion_ciudadano")
+    )
 
 with st.sidebar.expander("⚙️ Filtros Globales de Datos", expanded=False):
   provincias_disp = ["Todas las Provincias"] + sorted(
