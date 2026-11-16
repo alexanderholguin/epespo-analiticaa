@@ -114,36 +114,45 @@ def generar_excel_auditoria(df):
 
 
 @st.fragment
-def mostrar_botones_descarga_auditoria(df, clave, nombre_archivo):
-  col_csv, col_excel = st.columns(2)
-  with col_csv:
-    st.download_button(
-        "⬇️ Descargar CSV",
-        data=df.to_csv(index=False).encode("utf-8-sig"),
-        file_name=f"{nombre_archivo}.csv",
-        mime="text/csv",
-        use_container_width=True,
-        key=f"auditoria_boton_{clave}_csv",
-    )
-  with col_excel:
-    try:
-      datos_excel = generar_excel_auditoria(df)
-    except (
-        IllegalCharacterError,
-        ValueError,
-        TypeError,
-        OSError,
-    ) as error:
-      st.error(f"No se pudo generar el Excel: {error}")
-    else:
+def mostrar_botones_descarga_auditoria(opciones_descarga):
+  nombres_archivo = {
+      "todos": "todos_los_registros",
+      "sin_dni": "registros_sin_dni",
+      "completos": "dni_e_informacion_completa",
+  }
+  columnas = st.columns(len(opciones_descarga))
+  for columna, (clave, (titulo, df)) in zip(
+      columnas,
+      opciones_descarga.items(),
+  ):
+    with columna:
+      st.markdown(f"**{titulo} ({len(df):,})**")
       st.download_button(
-          "⬇️ Descargar Excel",
-          data=datos_excel,
-          file_name=f"{nombre_archivo}.xlsx",
-          mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "⬇️ Descargar CSV",
+          data=df.to_csv(index=False).encode("utf-8-sig"),
+          file_name=f"{nombres_archivo[clave]}.csv",
+          mime="text/csv",
           use_container_width=True,
-          key=f"auditoria_boton_{clave}_excel",
+          key=f"auditoria_boton_{clave}_csv",
       )
+      try:
+        datos_excel = generar_excel_auditoria(df)
+      except (
+          IllegalCharacterError,
+          ValueError,
+          TypeError,
+          OSError,
+      ) as error:
+        st.error(f"No se pudo generar el Excel de {titulo}: {error}")
+      else:
+        st.download_button(
+            "⬇️ Descargar Excel",
+            data=datos_excel,
+            file_name=f"{nombres_archivo[clave]}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            key=f"auditoria_boton_{clave}_excel",
+        )
 
 
 def mascara_informacion_completa(df):
@@ -1652,38 +1661,17 @@ with tab7:
           df_con_info_completa_total,
       ),
   }
-  if (
-      st.session_state.get("auditoria_conjunto_descarga")
-      not in opciones_descarga
-  ):
-    st.session_state["auditoria_conjunto_descarga"] = "todos"
-  seleccion_descarga = st.selectbox(
-      "Conjunto de datos:",
-      options=list(opciones_descarga),
-      format_func=lambda clave: (
-          f"{opciones_descarga[clave][0]} "
-          f"({len(opciones_descarga[clave][1]):,})"
-      ),
-      key="auditoria_conjunto_descarga",
-  )
-  titulo_descarga, df_seleccionado = opciones_descarga[seleccion_descarga]
-  df_descarga = df_original.reindex(df_seleccionado.index).copy()
-  df_descarga["cedula_limpia"] = df_seleccionado["cedula_limpia"]
-  df_descarga["estado_dni"] = df_seleccionado["estado_dni"]
-  nombres_archivo = {
-      "todos": "todos_los_registros",
-      "sin_dni": "registros_sin_dni",
-      "completos": "dni_e_informacion_completa",
+  opciones_descarga = {
+      clave: (
+          titulo,
+          df_original.loc[datos.index].assign(
+              cedula_limpia=datos["cedula_limpia"],
+              estado_dni=datos["estado_dni"],
+          ),
+      )
+      for clave, (titulo, datos) in opciones_descarga.items()
   }
-  st.caption(
-      f"{titulo_descarga}: {len(df_descarga):,} registros y "
-      f"{len(df_descarga.columns):,} columnas."
-  )
-  mostrar_botones_descarga_auditoria(
-      df_descarga,
-      seleccion_descarga,
-      nombres_archivo[seleccion_descarga],
-  )
+  mostrar_botones_descarga_auditoria(opciones_descarga)
 
   st.markdown("#### Distribución del estado del DNI")
   df_estado_dni = (
