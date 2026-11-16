@@ -120,39 +120,45 @@ def mostrar_botones_descarga_auditoria(opciones_descarga):
       "sin_dni": "registros_sin_dni",
       "completos": "dni_e_informacion_completa",
   }
-  columnas = st.columns(len(opciones_descarga))
-  for columna, (clave, (titulo, df)) in zip(
-      columnas,
-      opciones_descarga.items(),
-  ):
-    with columna:
-      st.markdown(f"**{titulo} ({len(df):,})**")
-      st.download_button(
-          "⬇️ Descargar CSV",
-          data=df.to_csv(index=False).encode("utf-8-sig"),
-          file_name=f"{nombres_archivo[clave]}.csv",
-          mime="text/csv",
-          use_container_width=True,
-          key=f"auditoria_boton_{clave}_csv",
-      )
-      try:
-        datos_excel = generar_excel_auditoria(df)
-      except (
-          IllegalCharacterError,
-          ValueError,
-          TypeError,
-          OSError,
-      ) as error:
-        st.error(f"No se pudo generar el Excel de {titulo}: {error}")
-      else:
+  
+  for clave, (titulo, df) in opciones_descarga.items():
+    with st.container(border=True):
+      col_info, col_csv, col_excel = st.columns([2, 1, 1])
+      
+      with col_info:
+        st.markdown(f"**{titulo}**")
+        st.caption(f"Total de registros disponibles: **{len(df):,}**")
+        
+      with col_csv:
+        st.markdown("")
         st.download_button(
-            "⬇️ Descargar Excel",
-            data=datos_excel,
-            file_name=f"{nombres_archivo[clave]}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "⬇️ Descargar CSV",
+            data=df.to_csv(index=False).encode("utf-8-sig"),
+            file_name=f"{nombres_archivo[clave]}.csv",
+            mime="text/csv",
             use_container_width=True,
-            key=f"auditoria_boton_{clave}_excel",
+            key=f"auditoria_boton_{clave}_csv",
         )
+        
+      with col_excel:
+        st.markdown("")
+        try:
+          datos_excel = generar_excel_auditoria(df)
+          st.download_button(
+              "⬇️ Descargar Excel",
+              data=datos_excel,
+              file_name=f"{nombres_archivo[clave]}.xlsx",
+              mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              use_container_width=True,
+              key=f"auditoria_boton_{clave}_excel",
+          )
+        except (
+            IllegalCharacterError,
+            ValueError,
+            TypeError,
+            OSError,
+        ) as error:
+          st.error(f"Error al generar Excel: {error}")
 
 
 def mascara_informacion_completa(df):
@@ -1645,21 +1651,43 @@ with tab7:
         "«Toda la base de datos» para ver los gráficos."
     )
 
-  st.markdown("#### Descargar registros")
-  st.caption(
-      "Las descargas usan toda la base de datos, independientemente de los "
-      "filtros aplicados al tablero."
-  )
+  st.markdown("#### 📥 Descarga de Registros por Rango de Años y Mes")
+  st.caption("Filtra por periodo específico para mantener las descargas ligeras y rápidas.")
 
-  # CORRECCIÓN DEFINITIVA DE LOS SUBJUNTO DE EXPORTACIÓN
-  df_todos_export = df_raw.copy()
-  df_sin_dni_export = df_raw[df_raw["estado_dni"] == "Sin DNI"].copy()
-  df_completos_export = df_raw[mascara_informacion_completa(df_raw)].copy()
+  anios_disponibles = sorted([int(a) for a in df_raw["anio"].dropna().unique() if a > 2000])
+  if anios_disponibles:
+    col_ini, col_fin, col_mes = st.columns(3)
+    with col_ini:
+      anio_desde = st.selectbox("Año inicial:", anios_disponibles, index=0, key="auditoria_anio_desde")
+    with col_fin:
+      anio_hasta = st.selectbox("Año final:", anios_disponibles, index=len(anios_disponibles)-1, key="auditoria_anio_hasta")
+    with col_mes:
+      opciones_meses_descarga = ["Todos los meses"] + list(NOMBRES_MESES.keys())
+      mes_sel_descarga = st.selectbox(
+          "Mes:",
+          opciones_meses_descarga,
+          format_func=lambda valor: "Todos" if valor == "Todos los meses" else NOMBRES_MESES.get(valor, str(valor)),
+          key="auditoria_mes_descarga"
+      )
+    
+    df_base_filtrado = df_raw[df_raw["anio"].between(anio_desde, anio_hasta)].copy()
+    if mes_sel_descarga != "Todos los meses":
+      df_base_filtrado = df_base_filtrado[df_base_filtrado["mes"] == mes_sel_descarga]
+      etiqueta_periodo = f"{anio_desde} - {anio_hasta} ({NOMBRES_MESES.get(mes_sel_descarga)})"
+    else:
+      etiqueta_periodo = f"{anio_desde} - {anio_hasta} (Todos los meses)"
+  else:
+    df_base_filtrado = df_raw.copy()
+    etiqueta_periodo = "Histórico completo"
+
+  df_todos_export = df_base_filtrado.copy()
+  df_sin_dni_export = df_base_filtrado[df_base_filtrado["estado_dni"] == "Sin DNI"].copy()
+  df_completos_export = df_base_filtrado[mascara_informacion_completa(df_base_filtrado)].copy()
 
   opciones_descarga_bruta = {
-      "todos": ("Todos los registros", df_todos_export),
-      "sin_dni": ("Registros sin DNI", df_sin_dni_export),
-      "completos": ("DNI e información completa", df_completos_export),
+      "todos": (f"Todos los registros [{etiqueta_periodo}]", df_todos_export),
+      "sin_dni": (f"Registros sin DNI [{etiqueta_periodo}]", df_sin_dni_export),
+      "completos": (f"DNI e info completa [{etiqueta_periodo}]", df_completos_export),
   }
 
   opciones_descarga = {
@@ -1668,7 +1696,7 @@ with tab7:
           df_original.loc[datos.index].assign(
               cedula_limpia=datos["cedula_limpia"],
               estado_dni=datos["estado_dni"],
-          ),
+          ) if not datos.empty else pd.DataFrame(columns=df_original.columns)
       )
       for clave, (titulo, datos) in opciones_descarga_bruta.items()
   }
