@@ -86,6 +86,14 @@ def cargar_datos_completos():
     st.stop()
 
 
+@st.cache_data(show_spinner=False)
+def generar_excel_auditoria(df):
+  archivo = BytesIO()
+  with pd.ExcelWriter(archivo, engine="openpyxl") as escritor:
+    df.to_excel(escritor, index=False, sheet_name="Registros")
+  return archivo.getvalue()
+
+
 # =============================================================
 # ESTILOS CSS GLOBALES INSTITUCIONALES
 # =============================================================
@@ -1459,17 +1467,28 @@ with tab6:
 with tab7:
   st.subheader("Auditoría de DNI y calidad de registros")
   st.caption(
-      "Los resultados respetan los filtros globales. “Con DNI” indica un "
+      "“Con DNI” indica un "
       "formato de 10 dígitos; no valida el dígito verificador oficial."
   )
-  total_auditoria = len(df_f)
-  sin_dni = int((df_f["estado_dni"] == "Sin DNI").sum())
-  dni_irregular = int((df_f["estado_dni"] == "DNI irregular").sum())
-  con_dni = int((df_f["estado_dni"] == "Con DNI").sum())
+  alcance_auditoria = st.radio(
+      "Datos para la auditoría:",
+      ["Toda la base de datos", "Aplicar filtros globales"],
+      horizontal=True,
+      key="auditoria_alcance",
+  )
+  df_auditoria = (
+      df_raw
+      if alcance_auditoria == "Toda la base de datos"
+      else df_f
+  )
+  total_auditoria = len(df_auditoria)
+  sin_dni = int((df_auditoria["estado_dni"] == "Sin DNI").sum())
+  dni_irregular = int((df_auditoria["estado_dni"] == "DNI irregular").sum())
+  con_dni = int((df_auditoria["estado_dni"] == "Con DNI").sum())
   campos_textuales_completos = {}
   for columna in ["nombres", "matricula", "curso", "modalidad"]:
     valores = (
-        df_f[columna]
+        df_auditoria[columna]
         .fillna("")
         .astype(str)
         .str.strip()
@@ -1494,20 +1513,27 @@ with tab7:
       valores_invalidos.add("sin nombre")
     campos_textuales_completos[columna] = ~valores.isin(valores_invalidos)
 
-  anio_valido = pd.to_numeric(df_f["anio"], errors="coerce").gt(0)
-  fecha_valida = pd.to_datetime(df_f["fecha"], errors="coerce").notna()
+  anio_valido = pd.to_numeric(
+      df_auditoria["anio"], errors="coerce"
+  ).gt(0)
+  fecha_valida = pd.to_datetime(
+      df_auditoria["fecha"], errors="coerce"
+  ).notna()
   mascara_info_completa = (
-      df_f["estado_dni"].eq("Con DNI")
+      df_auditoria["estado_dni"].eq("Con DNI")
       & campos_textuales_completos["nombres"]
       & campos_textuales_completos["matricula"]
       & campos_textuales_completos["curso"]
       & campos_textuales_completos["modalidad"]
       & (anio_valido | fecha_valida)
   )
-  df_con_info_completa = df_f[mascara_info_completa]
+  df_con_info_completa = df_auditoria[mascara_info_completa]
   ids_con_varios_registros = int(
       (
-          df_f.loc[df_f["estado_dni"] == "Con DNI", "cedula_limpia"]
+          df_auditoria.loc[
+              df_auditoria["estado_dni"] == "Con DNI",
+              "cedula_limpia",
+          ]
           .value_counts()
           > 1
       ).sum()
@@ -1547,12 +1573,44 @@ with tab7:
       "válido, nombres, matrícula, curso, modalidad y año o fecha."
   )
 
+  if df_auditoria.empty:
+    st.info(
+        "Los filtros globales no encontraron registros. Selecciona "
+        "«Toda la base de datos» para ver los gráficos y descargar información."
+    )
+
+  st.markdown("#### Distribución del estado del DNI")
+  df_estado_dni = (
+      df_auditoria["estado_dni"]
+      .value_counts()
+      .reindex(["Con DNI", "DNI irregular", "Sin DNI"], fill_value=0)
+      .rename_axis("Estado del DNI")
+      .reset_index(name="Registros")
+  )
+  fig_estado_dni = px.bar(
+      df_estado_dni,
+      x="Estado del DNI",
+      y="Registros",
+      color="Estado del DNI",
+      text="Registros",
+      title="Registros según estado del DNI",
+      category_orders={
+          "Estado del DNI": ["Con DNI", "DNI irregular", "Sin DNI"]
+      },
+  )
+  fig_estado_dni.update_layout(showlegend=False)
+  st.plotly_chart(
+      fig_estado_dni,
+      use_container_width=True,
+      key="auditoria_grafico_estado_dni",
+  )
+
   st.markdown("#### Descargar registros")
   opciones_descarga = {
-      "todos": ("Todos los registros", df_f),
+      "todos": ("Todos los registros", df_auditoria),
       "sin_dni": (
           "Registros sin DNI",
-          df_f[df_f["estado_dni"] == "Sin DNI"],
+          df_auditoria[df_auditoria["estado_dni"] == "Sin DNI"],
       ),
       "completos": (
           "DNI e información completa",
@@ -1585,9 +1643,7 @@ with tab7:
         f"Se descargarán {len(df_descarga):,} registros y "
         f"{len(df_descarga.columns):,} columnas."
     )
-    archivo_excel = BytesIO()
-    with pd.ExcelWriter(archivo_excel, engine="openpyxl") as escritor:
-      df_descarga.to_excel(escritor, index=False, sheet_name="Registros")
+    archivo_excel = generar_excel_auditoria(df_descarga)
     nombres_archivo = {
         "todos": "todos_los_registros",
         "sin_dni": "registros_sin_dni",
@@ -1597,7 +1653,7 @@ with tab7:
     col_descarga_excel, col_descarga_csv = st.columns(2)
     col_descarga_excel.download_button(
         "Descargar Excel",
-        data=archivo_excel.getvalue(),
+        data=archivo_excel,
         file_name=f"{nombre_archivo}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
@@ -1612,9 +1668,11 @@ with tab7:
         key="auditoria_descarga_csv",
     )
 
-  if not df_f.empty:
+  if not df_auditoria.empty:
     df_auditoria_curso = (
-        df_f.groupby("curso")
+        df_auditoria.assign(
+            curso=df_auditoria["curso"].fillna("Sin curso")
+        ).groupby("curso")
         .agg(
             total=("estado_dni", "size"),
             sin_dni=("estado_dni", lambda valores: (valores == "Sin DNI").sum()),
@@ -1661,7 +1719,9 @@ with tab7:
       fig_auditoria_cursos.update_layout(yaxis=dict(autorange="reversed"))
       st.plotly_chart(fig_auditoria_cursos, use_container_width=True)
     with col_tendencia_dni:
-      df_tendencia_dni = df_f[df_f["anio"] > 2000]
+      df_tendencia_dni = df_auditoria[
+          pd.to_numeric(df_auditoria["anio"], errors="coerce") > 2000
+      ]
       if not df_tendencia_dni.empty:
         df_tendencia_dni = (
             df_tendencia_dni.groupby(["anio", "estado_dni"])
