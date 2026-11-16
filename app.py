@@ -13,7 +13,7 @@ from sqlalchemy.exc import SQLAlchemyError
 import streamlit as st
 import unicodedata
 
-from auth import render_login, cerrar_sesion
+from auth import crear_gestor_cookies, render_login, cerrar_sesion
 from db import actualizar_registros_ciudadano, get_engine
 
 st.set_page_config(
@@ -23,7 +23,8 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-if not render_login():
+cookie_manager = crear_gestor_cookies()
+if not render_login(cookie_manager):
   st.stop()
 
 
@@ -527,6 +528,12 @@ st.sidebar.markdown(
     </div>
 """,
     unsafe_allow_html=True,
+)
+st.sidebar.button(
+    "🚪 Cerrar sesión",
+    on_click=cerrar_sesion,
+    use_container_width=True,
+    key="cerrar_sesion_button",
 )
 
 

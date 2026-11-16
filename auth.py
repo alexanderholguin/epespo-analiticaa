@@ -1,3 +1,9 @@
+from datetime import datetime, timedelta
+import os
+import secrets
+import time
+
+import extra_streamlit_components as stx
 import streamlit as st
 
 
@@ -5,6 +11,106 @@ import streamlit as st
 # EPESPO - SISTEMA DE AUTENTICACIÓN INSTITUCIONAL
 # ============================================================
 
+COOKIE_SESION = "epespo_session"
+DURACION_SESION_SEGUNDOS = 60 * 60
+
+USUARIOS_PERMITIDOS = {
+    "admin_epespo": {
+        "name": "Secretaría General",
+        "role": "admin",
+        "password": "admin1234"
+    },
+    "direccion_epespo": {
+        "name": "Dirección Académica",
+        "role": "viewer",
+        "password": "viewer1234"
+    }
+}
+
+
+@st.cache_resource
+def _sesiones_activas():
+    return {}
+
+
+def crear_gestor_cookies():
+    return stx.CookieManager(key="epespo_auth_cookie_manager")
+
+
+def _crear_token_sesion(usuario):
+    ahora = time.time()
+    sesiones = _sesiones_activas()
+    for token, (_, expiracion) in list(sesiones.items()):
+        if expiracion <= ahora:
+            sesiones.pop(token, None)
+
+    token = secrets.token_urlsafe(32)
+    sesiones[token] = (usuario, ahora + DURACION_SESION_SEGUNDOS)
+    return token
+
+
+def _usuario_desde_token(token):
+    if not isinstance(token, str):
+        return None
+
+    sesion = _sesiones_activas().get(token)
+    if not sesion:
+        return None
+
+    usuario, expiracion = sesion
+    if expiracion <= time.time() or usuario not in USUARIOS_PERMITIDOS:
+        _sesiones_activas().pop(token, None)
+        return None
+    return usuario
+
+
+def _datos_usuario(usuario):
+    datos = USUARIOS_PERMITIDOS.get(usuario)
+    if not datos:
+        return None
+    return {
+        "nombre": str(datos.get("name", usuario)),
+        "rol": str(datos.get("role", "")),
+    }
+
+
+def _establecer_sesion(usuario, token):
+    datos = _datos_usuario(usuario)
+    if not datos:
+        return False
+    st.session_state.autenticado = True
+    st.session_state.usuario = usuario
+    st.session_state.nombre = datos["nombre"]
+    st.session_state.rol = datos["rol"]
+    st.session_state["_token_sesion"] = token
+    return True
+
+
+def _limpiar_estado_sesion():
+    for clave in (
+        "autenticado",
+        "usuario",
+        "nombre",
+        "rol",
+        "_token_sesion",
+        "login_usuario",
+        "login_password",
+    ):
+        st.session_state.pop(clave, None)
+
+
+def _eliminar_cookie_sesion(cookie_manager):
+    if cookie_manager.get(cookie=COOKIE_SESION) is not None:
+        cookie_manager.delete(
+            COOKIE_SESION,
+            key="delete_epespo_auth_cookie",
+        )
+
+
+def _cookie_segura():
+    predeterminado = "true" if os.environ.get("K_SERVICE") else "false"
+    valor = os.environ.get("AUTH_COOKIE_SECURE", predeterminado)
+    return valor.strip().lower() in {"1", "true", "yes"}
 
 # ============================================================
 # 1. VERIFICACIÓN DE CREDENCIALES (Texto Plano - Definitivo)
@@ -13,34 +119,12 @@ import streamlit as st
 def verificar_credenciales(usuario, password):
     usuario = usuario.strip().lower()
     password = password.strip()
-    
-    # Credenciales directas en texto plano para acceso inmediato y sin errores
-    usuarios_permitidos = {
-        "admin_epespo": {
-            "name": "Secretaría General",
-            "role": "admin",
-            "password": "admin1234"
-        },
-        "direccion_epespo": {
-            "name": "Dirección Académica",
-            "role": "viewer",
-            "password": "viewer1234"
-        }
-    }
-    
-    if usuario not in usuarios_permitidos:
+
+    if usuario not in USUARIOS_PERMITIDOS:
         return None
 
-    datos = usuarios_permitidos[usuario]
-    
-    # Validación directa de contraseña
-    if password == datos["password"]:
-        return {
-            "nombre": str(datos.get("name", usuario)),
-            "rol": str(datos.get("role", "")),
-        }
-
-    return None
+    datos = USUARIOS_PERMITIDOS[usuario]
+    return _datos_usuario(usuario) if password == datos["password"] else None
 
 
 # ============================================================
@@ -199,12 +283,24 @@ def aplicar_estilos_login():
 # 3. PANTALLA DE INICIO DE SESIÓN
 # ============================================================
 
-def render_login():
-    if "autenticado" not in st.session_state:
-        st.session_state.autenticado = False
+def render_login(cookie_manager):
+    if st.session_state.pop("_cerrar_sesion_pendiente", False):
+        _eliminar_cookie_sesion(cookie_manager)
 
-    if st.session_state.autenticado:
+    if st.session_state.get("autenticado"):
+        token = st.session_state.get("_token_sesion")
+        usuario = _usuario_desde_token(token)
+        if usuario and _establecer_sesion(usuario, token):
+            return True
+        _limpiar_estado_sesion()
+        _eliminar_cookie_sesion(cookie_manager)
+
+    token_cookie = cookie_manager.get(cookie=COOKIE_SESION)
+    usuario_cookie = _usuario_desde_token(token_cookie)
+    if usuario_cookie and _establecer_sesion(usuario_cookie, token_cookie):
         return True
+    if token_cookie is not None:
+        _eliminar_cookie_sesion(cookie_manager)
 
     aplicar_estilos_login()
 
@@ -251,10 +347,22 @@ def render_login():
                     user_data = verificar_credenciales(usuario_normalizado, password)
 
                     if user_data:
+                        token = _crear_token_sesion(usuario_normalizado)
                         st.session_state.autenticado = True
                         st.session_state.usuario = usuario_normalizado
                         st.session_state.nombre = user_data["nombre"]
                         st.session_state.rol = user_data["rol"]
+                        st.session_state["_token_sesion"] = token
+                        cookie_manager.set(
+                            COOKIE_SESION,
+                            token,
+                            key="set_epespo_auth_cookie",
+                            max_age=DURACION_SESION_SEGUNDOS,
+                            expires_at=datetime.now()
+                            + timedelta(seconds=DURACION_SESION_SEGUNDOS),
+                            secure=_cookie_segura(),
+                            same_site="strict",
+                        )
                         st.rerun()
                     else:
                         st.error("Credenciales incorrectas. Verifique su usuario y contraseña.")
@@ -278,16 +386,9 @@ def render_login():
 # ============================================================
 
 def cerrar_sesion():
-    claves_autenticacion = [
-        "autenticado",
-        "usuario",
-        "nombre",
-        "rol",
-        "login_usuario",
-        "login_password"
-    ]
+    token = st.session_state.get("_token_sesion")
+    if token:
+        _sesiones_activas().pop(token, None)
 
-    for clave in claves_autenticacion:
-        st.session_state.pop(clave, None)
-
-    st.rerun()
+    _limpiar_estado_sesion()
+    st.session_state["_cerrar_sesion_pendiente"] = True
