@@ -1549,63 +1549,51 @@ with tab7:
 
   st.markdown("#### Descargar registros")
   opciones_descarga = {
-      f"Todos los registros ({len(df_f):,})": df_f,
-      f"Registros sin DNI ({sin_dni:,})": df_f[
-          df_f["estado_dni"] == "Sin DNI"
-      ],
-      (
-          "DNI e información completa "
-          f"({len(df_con_info_completa):,})"
-      ): df_con_info_completa,
+      "todos": ("Todos los registros", df_f),
+      "sin_dni": (
+          "Registros sin DNI",
+          df_f[df_f["estado_dni"] == "Sin DNI"],
+      ),
+      "completos": (
+          "DNI e información completa",
+          df_con_info_completa,
+      ),
   }
-  with st.form("form_seleccionar_descarga_dni"):
-    seleccion_descarga = st.selectbox(
-        "Conjunto de datos:",
-        options=list(opciones_descarga),
-        key="auditoria_conjunto_descarga",
-    )
-    preparar_descarga = st.form_submit_button(
-        "Preparar descarga",
-        use_container_width=True,
-    )
+  if (
+      st.session_state.get("auditoria_conjunto_descarga")
+      not in opciones_descarga
+  ):
+    st.session_state["auditoria_conjunto_descarga"] = "todos"
+  seleccion_descarga = st.selectbox(
+      "Conjunto de datos:",
+      options=list(opciones_descarga),
+      format_func=lambda clave: (
+          f"{opciones_descarga[clave][0]} "
+          f"({len(opciones_descarga[clave][1]):,})"
+      ),
+      key="auditoria_conjunto_descarga",
+  )
+  df_seleccionado = opciones_descarga[seleccion_descarga][1]
+  df_descarga = df_original.loc[df_seleccionado.index].copy()
+  for columna in ("cedula_limpia", "estado_dni"):
+    df_descarga[columna] = df_seleccionado[columna]
 
-  if preparar_descarga:
-    st.session_state["auditoria_descarga_preparada"] = seleccion_descarga
-
-  seleccion_preparada = st.session_state.get("auditoria_descarga_preparada")
-  if seleccion_preparada in opciones_descarga:
-    df_descarga = opciones_descarga[seleccion_preparada]
-    columnas_descarga = [
-        columna
-        for columna in [
-            "cedula",
-            "nombres",
-            "matricula",
-            "anio",
-            "mes",
-            "fecha",
-            "fec_ini",
-            "fec_fin",
-            "curso",
-            "modalidad",
-            "provincia",
-            "condicion",
-            "impresion",
-            "estado_dni",
-        ]
-        if columna in df_descarga.columns
-    ]
-    df_descarga = df_descarga[columnas_descarga]
+  if df_descarga.empty:
+    st.info("El conjunto seleccionado no contiene registros para descargar.")
+  else:
+    st.caption(
+        f"Se descargarán {len(df_descarga):,} registros y "
+        f"{len(df_descarga.columns):,} columnas."
+    )
     archivo_excel = BytesIO()
     with pd.ExcelWriter(archivo_excel, engine="openpyxl") as escritor:
       df_descarga.to_excel(escritor, index=False, sheet_name="Registros")
-    nombre_archivo = (
-        seleccion_preparada.split(" (")[0]
-        .lower()
-        .replace(" ", "_")
-        .replace("ó", "o")
-        .replace("í", "i")
-    )
+    nombres_archivo = {
+        "todos": "todos_los_registros",
+        "sin_dni": "registros_sin_dni",
+        "completos": "dni_e_informacion_completa",
+    }
+    nombre_archivo = nombres_archivo[seleccion_descarga]
     col_descarga_excel, col_descarga_csv = st.columns(2)
     col_descarga_excel.download_button(
         "Descargar Excel",
@@ -1613,6 +1601,7 @@ with tab7:
         file_name=f"{nombre_archivo}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
+        key="auditoria_descarga_excel",
     )
     col_descarga_csv.download_button(
         "Descargar CSV",
@@ -1620,6 +1609,7 @@ with tab7:
         file_name=f"{nombre_archivo}.csv",
         mime="text/csv",
         use_container_width=True,
+        key="auditoria_descarga_csv",
     )
 
   if not df_f.empty:
