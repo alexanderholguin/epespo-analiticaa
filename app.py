@@ -94,24 +94,35 @@ def generar_excel_auditoria(df):
 
 
 @st.fragment
-def mostrar_botones_descarga_auditoria(df, nombre_archivo):
-  st.download_button(
-      "⬇️ Descargar CSV",
-      data=df.to_csv(index=False).encode("utf-8-sig"),
-      file_name=f"{nombre_archivo}.csv",
-      mime="text/csv",
-      type="primary",
-      use_container_width=True,
-      key="auditoria_boton_descarga_csv",
-  )
-  st.download_button(
-      "⬇️ Descargar Excel",
-      data=generar_excel_auditoria(df),
-      file_name=f"{nombre_archivo}.xlsx",
-      mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      use_container_width=True,
-      key="auditoria_boton_descarga_excel",
-  )
+def mostrar_botones_descarga_auditoria(opciones_descarga):
+  nombres_archivo = {
+      "todos": "todos_los_registros",
+      "sin_dni": "registros_sin_dni",
+      "completos": "dni_e_informacion_completa",
+  }
+  columnas = st.columns(len(opciones_descarga))
+  for columna, (clave, (titulo, df)) in zip(
+      columnas,
+      opciones_descarga.items(),
+  ):
+    with columna:
+      st.markdown(f"**{titulo} ({len(df):,})**")
+      st.download_button(
+          "⬇️ Descargar CSV",
+          data=df.to_csv(index=False).encode("utf-8-sig"),
+          file_name=f"{nombres_archivo[clave]}.csv",
+          mime="text/csv",
+          use_container_width=True,
+          key=f"auditoria_boton_{clave}_csv",
+      )
+      st.download_button(
+          "⬇️ Descargar Excel",
+          data=generar_excel_auditoria(df),
+          file_name=f"{nombres_archivo[clave]}.xlsx",
+          mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          use_container_width=True,
+          key=f"auditoria_boton_{clave}_excel",
+      )
 
 
 def mascara_informacion_completa(df):
@@ -1620,41 +1631,17 @@ with tab7:
           df_con_info_completa_total,
       ),
   }
-  if (
-      st.session_state.get("auditoria_conjunto_descarga")
-      not in opciones_descarga
-  ):
-    st.session_state["auditoria_conjunto_descarga"] = "todos"
-  seleccion_descarga = st.selectbox(
-      "Conjunto de datos:",
-      options=list(opciones_descarga),
-      format_func=lambda clave: (
-          f"{opciones_descarga[clave][0]} "
-          f"({len(opciones_descarga[clave][1]):,})"
-      ),
-      key="auditoria_conjunto_descarga",
-  )
-  df_seleccionado = opciones_descarga[seleccion_descarga][1]
-  df_descarga = df_original.loc[df_seleccionado.index].copy()
-  for columna in ("cedula_limpia", "estado_dni"):
-    df_descarga[columna] = df_seleccionado[columna]
-
-  if df_descarga.empty:
-    st.info(
-        "El conjunto seleccionado no contiene registros; el archivo se "
-        "descargará con los encabezados de las columnas."
-    )
-  st.caption(
-      f"Archivo seleccionado: {len(df_descarga):,} registros, "
-      f"{len(df_descarga.columns):,} columnas."
-  )
-  nombres_archivo = {
-      "todos": "todos_los_registros",
-      "sin_dni": "registros_sin_dni",
-      "completos": "dni_e_informacion_completa",
+  opciones_descarga = {
+      clave: (
+          titulo,
+          df_original.loc[datos.index].assign(
+              cedula_limpia=datos["cedula_limpia"],
+              estado_dni=datos["estado_dni"],
+          ),
+      )
+      for clave, (titulo, datos) in opciones_descarga.items()
   }
-  nombre_archivo = nombres_archivo[seleccion_descarga]
-  mostrar_botones_descarga_auditoria(df_descarga, nombre_archivo)
+  mostrar_botones_descarga_auditoria(opciones_descarga)
 
   st.markdown("#### Distribución del estado del DNI")
   df_estado_dni = (
