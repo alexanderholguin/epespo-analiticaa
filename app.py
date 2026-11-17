@@ -656,7 +656,8 @@ def cargar_datos_preparados():
   return df_original, df_raw
 
 
-df_original, df_raw = cargar_datos_preparados()
+with st.spinner("Consultando y preparando la información..."):
+  df_original, df_raw = cargar_datos_preparados()
 if df_raw.empty:
   st.error("No se encontraron registros en la base de datos.")
   st.stop()
@@ -706,34 +707,32 @@ with st.sidebar.expander("🔍 Búsqueda de Ciudadano", expanded=False):
 
   if dni_sidebar or ape_sidebar:
     resultados_principales.subheader("Resultado de búsqueda")
-    coincidencias = df_raw.copy()
-    if dni_sidebar:
-      busqueda_dni = "".join(
-          caracter for caracter in dni_sidebar if caracter.isdigit()
-      )
-      if not busqueda_dni:
-        busqueda_dni = dni_sidebar.strip()
-      coincidencias = coincidencias[
-          coincidencias["cedula_limpia"]
-          .astype(str)
-          .str.contains(busqueda_dni, na=False, regex=False)
-      ]
-    if ape_sidebar:
-      coincidencias = coincidencias[
-          coincidencias["nombres"]
-          .fillna("")
-          .astype(str)
-          .str.contains(ape_sidebar.strip(), case=False, na=False, regex=False)
-      ]
+    with st.spinner("Buscando información del ciudadano..."):
+      coincidencias = df_raw.copy()
+      if dni_sidebar:
+        busqueda_dni = "".join(
+            caracter for caracter in dni_sidebar if caracter.isdigit()
+        )
+        if not busqueda_dni:
+          busqueda_dni = dni_sidebar.strip()
+        coincidencias = coincidencias[
+            coincidencias["cedula_limpia"]
+            .astype(str)
+            .str.contains(busqueda_dni, na=False, regex=False)
+        ]
+      if ape_sidebar:
+        coincidencias = coincidencias[
+            coincidencias["nombres"]
+            .fillna("")
+            .astype(str)
+            .str.contains(
+                ape_sidebar.strip(),
+                case=False,
+                na=False,
+                regex=False,
+            )
+        ]
 
-    resultados_principales.caption(
-        f"Coincidencias encontradas: {len(coincidencias):,} registros"
-    )
-    if coincidencias.empty:
-      resultados_principales.info(
-          "No se encontraron ciudadanos con esos datos."
-      )
-    else:
       grupos_persona = {}
       for _, fila in coincidencias.iterrows():
         dni_digitos = "".join(
@@ -748,9 +747,16 @@ with st.sidebar.expander("🔍 Búsqueda de Ciudadano", expanded=False):
           matricula_clave = texto_celda(fila["matricula"]).casefold()
           clave_persona = ("sin_dni", nombre_clave, matricula_clave)
         grupos_persona.setdefault(clave_persona, []).append(fila.name)
-
       claves_persona = list(grupos_persona)
 
+    resultados_principales.caption(
+        f"Coincidencias encontradas: {len(coincidencias):,} registros"
+    )
+    if coincidencias.empty:
+      resultados_principales.info(
+          "No se encontraron ciudadanos con esos datos."
+      )
+    else:
       def etiqueta_persona(indice):
         clave = claves_persona[indice]
         filas = grupos_persona[clave]
@@ -1111,6 +1117,15 @@ seccion_activa = st.selectbox(
     secciones_analiticas,
     key="seccion_analitica",
 )
+seccion_cambio = (
+    st.session_state.get("_seccion_analitica_renderizada") != seccion_activa
+)
+indicador_carga_seccion = None
+if seccion_cambio:
+  indicador_carga_seccion = st.status(
+      "Cargando sección de análisis...",
+      expanded=False,
+  )
 
 if seccion_activa == secciones_analiticas[0]:
   st.subheader("Evolución anual de registros y resultados")
@@ -2189,3 +2204,7 @@ if seccion_activa == secciones_analiticas[9]:
         st.warning("El marino cuenta con un solo registro histórico en la base de datos.")
   else:
     st.info("No se encontraron registros con DNI válido para procesar el simulador de escalafón.")
+
+if indicador_carga_seccion is not None:
+  indicador_carga_seccion.empty()
+  st.session_state["_seccion_analitica_renderizada"] = seccion_activa
