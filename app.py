@@ -16,7 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 import streamlit as st
 import unicodedata
 
-from auth import render_login, cerrar_sesion
+from auth import crear_gestor_cookies, render_login, cerrar_sesion
 from db import actualizar_registros_ciudadano, get_engine
 
 st.set_page_config(
@@ -26,7 +26,8 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-if not render_login():
+cookie_manager = crear_gestor_cookies()
+if not render_login(cookie_manager):
   st.stop()
 
 
@@ -1176,37 +1177,62 @@ if seccion_activa == secciones_analiticas[1]:
           df_prov["cantidad"] / df_prov["cantidad"].sum() * 100
       )
       df_prov = df_prov.sort_values("cantidad", ascending=True)
-      fig_map = px.bar(
-          df_prov,
-          x="cantidad",
-          y="provincia",
-          orientation="h",
-          text="cantidad",
-          custom_data=["porcentaje"],
+      df_mapa = df_prov.copy()
+      df_mapa["lat"] = df_mapa["provincia"].map(
+          lambda provincia: GEO_PROVINCIAS.get(provincia, {}).get("lat")
+      )
+      df_mapa["lon"] = df_mapa["provincia"].map(
+          lambda provincia: GEO_PROVINCIAS.get(provincia, {}).get("lon")
+      )
+      df_mapa = df_mapa.dropna(subset=["lat", "lon"])
+      fig_map = px.scatter_geo(
+          df_mapa,
+          lat="lat",
+          lon="lon",
+          size="cantidad",
+          color="cantidad",
+          text="provincia",
+          hover_name="provincia",
+          hover_data={
+              "cantidad": ":,",
+              "porcentaje": ":.1f",
+              "lat": False,
+              "lon": False,
+          },
+          color_continuous_scale="Blues",
+          size_max=42,
+          scope="south america",
           title="Registros por provincia",
       )
       fig_map.update_traces(
-          marker_color="#0284C7",
           marker_line_color="#0A2540",
           marker_line_width=1,
-          texttemplate="%{x:,.0f}",
-          textposition="outside",
-          cliponaxis=False,
-          hovertemplate=(
-              "%{y}<br>Registros: %{x:,.0f}"
-              "<br>Participación: %{customdata[0]:.1f}%<extra></extra>"
-          ),
+          textposition="top center",
+      )
+      fig_map.update_geos(
+          center={"lat": -1.5, "lon": -80.5},
+          lataxis_range=[-6, 2],
+          lonaxis_range=[-92, -75],
+          showcountries=True,
+          countrycolor="#64748B",
+          showland=True,
+          landcolor="#F1F5F9",
+          showocean=True,
+          oceancolor="#EFF6FF",
+          showcoastlines=True,
+          coastlinecolor="#64748B",
+          projection_type="mercator",
       )
       fig_map.update_layout(
-          plot_bgcolor="white",
-          paper_bgcolor="white",
-          height=max(450, len(df_prov) * 35),
-          margin=dict(t=55, b=35, l=20, r=80),
-          xaxis_title="Cantidad de registros",
-          yaxis_title="",
+          height=520,
+          margin=dict(t=55, b=20, l=20, r=20),
+          coloraxis_colorbar_title="Registros",
       )
-      fig_map.update_yaxes(autorange="reversed")
       st.plotly_chart(fig_map, use_container_width=True)
+      st.caption(
+          "El tamaño del marcador representa la cantidad de registros. "
+          "Las provincias sin coordenadas se muestran en la tabla."
+      )
     with col_m2:
       st.markdown("### Resumen por Provincia")
       st.dataframe(

@@ -1,4 +1,16 @@
+from datetime import datetime, timedelta
+import os
+import secrets
+
+import extra_streamlit_components as stx
 import streamlit as st
+from sqlalchemy.exc import SQLAlchemyError
+
+from db import (
+    guardar_sesion_autenticacion,
+    obtener_sesion_autenticacion,
+    revocar_sesion_autenticacion,
+)
 
 # ============================================================
 # EPESPO - SISTEMA DE AUTENTICACIÓN INSTITUCIONAL
@@ -17,6 +29,13 @@ USUARIOS_PERMITIDOS = {
     }
 }
 
+COOKIE_SESION = "epespo_session"
+DIAS_PERSISTENCIA_COOKIE = 3650
+
+
+def crear_gestor_cookies():
+    return stx.CookieManager(key="epespo_auth_cookie_manager")
+
 
 def verificar_credenciales(usuario, password):
     usuario = usuario.strip().lower()
@@ -32,6 +51,68 @@ def verificar_credenciales(usuario, password):
             "rol": str(datos.get("role", "")),
         }
     return None
+
+
+def _crear_token_sesion(usuario):
+    token = secrets.token_urlsafe(32)
+    guardar_sesion_autenticacion(token, usuario)
+    return token
+
+
+def _sesion_desde_token(token):
+    if not isinstance(token, str):
+        return None
+
+    usuario = obtener_sesion_autenticacion(token)
+    if usuario is None:
+        return None
+
+    if usuario not in USUARIOS_PERMITIDOS:
+        revocar_sesion_autenticacion(token)
+        return None
+    return usuario
+
+
+def _establecer_sesion(usuario, token):
+    datos = USUARIOS_PERMITIDOS.get(usuario)
+    if not datos:
+        return False
+    st.session_state.autenticado = True
+    st.session_state.usuario = usuario
+    st.session_state.nombre = str(datos.get("name", usuario))
+    st.session_state.rol = str(datos.get("role", ""))
+    st.session_state["_token_sesion"] = token
+    return True
+
+
+def _limpiar_estado_sesion():
+    for clave in (
+        "autenticado",
+        "usuario",
+        "nombre",
+        "rol",
+        "_token_sesion",
+        "login_usuario",
+        "login_password",
+    ):
+        st.session_state.pop(clave, None)
+
+
+def _eliminar_cookie_sesion(cookie_manager):
+    if cookie_manager.get(cookie=COOKIE_SESION) is not None:
+        cookie_manager.delete(
+            COOKIE_SESION,
+            key="delete_epespo_auth_cookie",
+        )
+
+
+def _cookie_segura():
+    valor = os.environ.get("AUTH_COOKIE_SECURE", "true")
+    return valor.strip().lower() in {"1", "true", "yes"}
+
+
+def _error_persistencia_sesion(error):
+    st.error(f"No se pudo validar o guardar la sesión: {error}")
 
 
 # ============================================================
@@ -182,84 +263,148 @@ def aplicar_estilos_login():
 # PANTALLA DE INICIO DE SESIÓN
 # ============================================================
 
-def render_login():
+def render_login(cookie_manager):
+    sesion_cerrada = st.session_state.pop("_cerrar_sesion_pendiente", False)
+    if sesion_cerrada:
+        _eliminar_cookie_sesion(cookie_manager)
+        error_cierre = st.session_state.pop("_error_cierre_sesion", None)
+        if error_cierre:
+            st.warning(error_cierre)
+
     if st.session_state.get("autenticado"):
+        token = st.session_state.get("_token_sesion")
+        usuario = st.session_state.get("usuario")
+        if token and usuario in USUARIOS_PERMITIDOS:
+            return _establecer_sesion(usuario, token)
+        if token:
+            try:
+                revocar_sesion_autenticacion(token)
+            except (SQLAlchemyError, RuntimeError, ValueError) as error:
+                _error_persistencia_sesion(error)
+                st.stop()
+        _limpiar_estado_sesion()
+        _eliminar_cookie_sesion(cookie_manager)
+
+    token_cookie = (
+        None
+        if sesion_cerrada
+        else cookie_manager.get(cookie=COOKIE_SESION)
+    )
+    try:
+        usuario_cookie = _sesion_desde_token(token_cookie)
+    except (SQLAlchemyError, RuntimeError, ValueError) as error:
+        _error_persistencia_sesion(error)
+        st.stop()
+    if usuario_cookie and _establecer_sesion(usuario_cookie, token_cookie):
         return True
+    if token_cookie is not None:
+        _eliminar_cookie_sesion(cookie_manager)
 
     aplicar_estilos_login()
+    login_ui = st.empty()
+    with login_ui.container():
+        html_header = (
+            '<div class="epespo-header">'
+            '<div class="epespo-logo">⚓</div>'
+            '<div class="epespo-title">EPESPO | SUITE MARÍTIMA</div>'
+            '<div class="epespo-subtitle">'
+            'Plataforma Institucional de Inteligencia Analítica'
+            '<br>'
+            'Gestión Estadística y Titulaciones Marítimas'
+            '</div>'
+            '<div class="epespo-divider"></div>'
+            '</div>'
+        )
+        st.markdown(html_header, unsafe_allow_html=True)
 
-    html_header = (
-        '<div class="epespo-header">'
-        '<div class="epespo-logo">⚓</div>'
-        '<div class="epespo-title">EPESPO | SUITE MARÍTIMA</div>'
-        '<div class="epespo-subtitle">'
-        'Plataforma Institucional de Inteligencia Analítica'
-        '<br>'
-        'Gestión Estadística y Titulaciones Marítimas'
-        '</div>'
-        '<div class="epespo-divider"></div>'
-        '</div>'
-    )
+        col_izq, col_centro, col_der = st.columns([1, 1.4, 1])
+        with col_centro:
+            with st.form("form_login"):
+                st.markdown(
+                    '<h3 style="text-align:center;color:#103B70;font-size:22px;font-weight:750;margin-bottom:5px;">Acceso al Sistema</h3>',
+                    unsafe_allow_html=True,
+                )
+                st.markdown(
+                    '<p style="text-align:center;color:#71859A;font-size:13px;margin-bottom:24px;">Ingrese sus credenciales institucionales</p>',
+                    unsafe_allow_html=True,
+                )
+                usuario = st.text_input(
+                    "Usuario",
+                    placeholder="Ingrese su usuario",
+                    key="login_usuario",
+                    autocomplete="username",
+                )
+                password = st.text_input(
+                    "Contraseña",
+                    type="password",
+                    placeholder="Ingrese su contraseña",
+                    key="login_password",
+                    autocomplete="current-password",
+                )
+                st.write("")
+                submit = st.form_submit_button(
+                    "Ingresar al Sistema",
+                    use_container_width=True,
+                )
 
-    st.markdown(html_header, unsafe_allow_html=True)
-
-    col_izq, col_centro, col_der = st.columns([1, 1.4, 1])
-
-    with col_centro:
-        with st.form("form_login"):
-            st.markdown(
-                '<h3 style="text-align:center;color:#103B70;font-size:22px;font-weight:750;margin-bottom:5px;">Acceso al Sistema</h3>',
-                unsafe_allow_html=True
-            )
-            st.markdown(
-                '<p style="text-align:center;color:#71859A;font-size:13px;margin-bottom:24px;">Ingrese sus credenciales institucionales</p>',
-                unsafe_allow_html=True
-            )
-
-            usuario = st.text_input(
-                "Usuario",
-                placeholder="Ingrese su usuario",
-                key="login_usuario",
-                autocomplete="username",
-            )
-            password = st.text_input(
-                "Contraseña",
-                type="password",
-                placeholder="Ingrese su contraseña",
-                key="login_password",
-                autocomplete="current-password",
-            )
-
-            st.write("")
-
-            submit = st.form_submit_button("Ingresar al Sistema", use_container_width=True)
-
-            if submit:
-                if not usuario.strip() or not password:
-                    st.warning("Por favor, ingrese su usuario y contraseña.")
-                else:
-                    user_data = verificar_credenciales(usuario, password)
-
-                    if user_data:
-                        st.session_state.autenticado = True
-                        st.session_state.usuario = usuario.strip().lower()
-                        st.session_state.nombre = user_data["nombre"]
-                        st.session_state.rol = user_data["rol"]
-                        st.rerun()
+                if submit:
+                    if not usuario.strip() or not password:
+                        st.warning("Por favor, ingrese su usuario y contraseña.")
                     else:
-                        st.error("Credenciales incorrectas. Verifique su usuario y contraseña.")
+                        usuario_normalizado = usuario.strip().lower()
+                        user_data = verificar_credenciales(
+                            usuario_normalizado,
+                            password,
+                        )
+                        if not user_data:
+                            st.error(
+                                "Credenciales incorrectas. Verifique su "
+                                "usuario y contraseña."
+                            )
+                        else:
+                            try:
+                                token = _crear_token_sesion(usuario_normalizado)
+                            except (
+                                SQLAlchemyError,
+                                RuntimeError,
+                                ValueError,
+                            ) as error:
+                                _error_persistencia_sesion(error)
+                            else:
+                                _establecer_sesion(
+                                    usuario_normalizado,
+                                    token,
+                                )
+                                cookie_manager.set(
+                                    COOKIE_SESION,
+                                    token,
+                                    key="set_epespo_auth_cookie",
+                                    max_age=(
+                                        DIAS_PERSISTENCIA_COOKIE
+                                        * 24
+                                        * 60
+                                        * 60
+                                    ),
+                                    expires_at=datetime.now()
+                                    + timedelta(
+                                        days=DIAS_PERSISTENCIA_COOKIE
+                                    ),
+                                    secure=_cookie_segura(),
+                                    same_site="strict",
+                                )
+                                login_ui.empty()
+                                return True
 
-    html_footer = (
-        '<div class="epespo-footer">'
-        'FUNDACIÓN ESCUELA DE PESCA DEL PACÍFICO ORIENTAL'
-        '<br>'
-        'Sistema de Consulta y Análisis Institucional'
-        '<br>'
-        '© 2026 EPESPO'
-        '</div>'
-    )
-
-    st.markdown(html_footer, unsafe_allow_html=True)
+        html_footer = (
+            '<div class="epespo-footer">'
+            'FUNDACIÓN ESCUELA DE PESCA DEL PACÍFICO ORIENTAL'
+            '<br>'
+            'Sistema de Consulta y Análisis Institucional'
+            '<br>'
+            '© 2026 EPESPO'
+            '</div>'
+        )
+        st.markdown(html_footer, unsafe_allow_html=True)
     return False
 
 
@@ -268,12 +413,15 @@ def render_login():
 # ============================================================
 
 def cerrar_sesion():
-    for clave in (
-        "autenticado",
-        "usuario",
-        "nombre",
-        "rol",
-        "login_usuario",
-        "login_password",
-    ):
-        st.session_state.pop(clave, None)
+    token = st.session_state.get("_token_sesion")
+    if token:
+        try:
+            revocar_sesion_autenticacion(token)
+        except (SQLAlchemyError, RuntimeError, ValueError) as error:
+            st.session_state["_error_cierre_sesion"] = (
+                "No se pudo revocar la sesión en la base de datos. "
+                f"Detalle: {error}"
+            )
+
+    _limpiar_estado_sesion()
+    st.session_state["_cerrar_sesion_pendiente"] = True
