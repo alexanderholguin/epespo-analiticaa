@@ -317,6 +317,9 @@ def render_login(cookie_manager):
         html_header = (
             '<div class="epespo-header">'
             f'<img class="epespo-logo-image" src="{LOGO_NAVY_DATA_URI}" '
+            'width="190" height="208" '
+            'style="display:block;width:min(190px,62vw);height:auto;'
+            'max-width:100%;margin:0 auto 14px" '
             'alt="Logo EPESPO">'
             '<div class="epespo-title">EPESPO | SUITE MARÍTIMA</div>'
             '<div class="epespo-subtitle">'

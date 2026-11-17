@@ -10,24 +10,43 @@ _ANIO_DESDE = 2021
 
 _RUTAS_ASCENSO = {
     normalizar_curso("Marinero Pescador"): (
+        "Cubierta",
         normalizar_curso("Marinero De Primera De Puente De B/P"),
         2,
     ),
     normalizar_curso("Marinero De Primera De Puente De B/P"): (
+        "Cubierta",
         normalizar_curso("Patrón De Pesca Costanero"),
         2,
     ),
     normalizar_curso("Patrón De Pesca Costanero"): (
+        "Cubierta",
         normalizar_curso("Patrón / Capitán De Pesca De Altura"),
         3,
     ),
-    normalizar_curso("Patrón De Altura"): ("Capitán", 3),
+    normalizar_curso("Patrón De Altura"): ("Cubierta", "Capitán", 3),
+    normalizar_curso("Marinero De Máquinas"): (
+        "Máquinas",
+        normalizar_curso("Marinero De Primera De Máquinas De B/P"),
+        2,
+    ),
+    normalizar_curso("Marinero De Primera De Máquinas De B/P"): (
+        "Máquinas",
+        normalizar_curso("Primer Oficial De Máquinas"),
+        2,
+    ),
+    normalizar_curso("Primer Oficial De Máquinas"): (
+        "Máquinas",
+        normalizar_curso("Jefe De Máquinas"),
+        3,
+    ),
 }
 
 _COLUMNAS_CANDIDATOS = [
     "cedula_limpia",
     "nombres",
     "provincia",
+    "area",
     "curso_origen",
     "curso_objetivo",
     "fecha_referencia",
@@ -98,7 +117,7 @@ def calcular_candidatos_ascenso(
     df: pd.DataFrame,
     fecha_corte: date | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, int]]:
-    columnas_demanda = ["curso_objetivo", "candidatos"]
+    columnas_demanda = ["area", "curso_objetivo", "candidatos"]
     totales = {
         "personas_evaluadas": 0,
         "personas_con_ruta": 0,
@@ -202,8 +221,9 @@ def calcular_candidatos_ascenso(
     evaluables = ultimo_curso.loc[tiene_ruta].copy()
     rutas_evaluables = rutas.loc[tiene_ruta]
     evaluables["curso_origen"] = evaluables["curso_normalizado"]
-    evaluables["curso_objetivo"] = rutas_evaluables.map(lambda ruta: ruta[0])
-    evaluables["umbral_anios"] = rutas_evaluables.map(lambda ruta: ruta[1])
+    evaluables["area"] = rutas_evaluables.map(lambda ruta: ruta[0])
+    evaluables["curso_objetivo"] = rutas_evaluables.map(lambda ruta: ruta[1])
+    evaluables["umbral_anios"] = rutas_evaluables.map(lambda ruta: ruta[2])
     sin_fecha = evaluables["fecha_referencia"].isna()
     totales["sin_fecha"] = int(sin_fecha.sum())
 
@@ -227,16 +247,18 @@ def calcular_candidatos_ascenso(
     candidatos = listos[_COLUMNAS_CANDIDATOS].reset_index(drop=True)
     totales["candidatos_potenciales"] = len(candidatos)
 
-    cursos_objetivo = list(dict.fromkeys(_RUTAS_ASCENSO.values()))
-    nombres_objetivo = list(
-        dict.fromkeys(ruta[0] for ruta in cursos_objetivo)
+    rutas_objetivo = list(
+        dict.fromkeys((ruta[0], ruta[1]) for ruta in _RUTAS_ASCENSO.values())
+    )
+    indice_objetivos = pd.MultiIndex.from_tuples(
+        rutas_objetivo,
+        names=["area", "curso_objetivo"],
     )
     demanda = (
-        candidatos.groupby("curso_objetivo")
+        candidatos.groupby(["area", "curso_objetivo"])
         .size()
-        .reindex(nombres_objetivo, fill_value=0)
+        .reindex(indice_objetivos, fill_value=0)
         .rename("candidatos")
-        .rename_axis("curso_objetivo")
         .reset_index()
     )
     return candidatos, demanda, totales

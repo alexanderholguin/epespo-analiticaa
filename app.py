@@ -31,6 +31,7 @@ from db import (
     get_engine,
     insertar_registros_importados,
 )
+from estadisticas_areas import resumir_areas_especialidades
 from estadisticas_provinciales import (
     calcular_tasas_graduacion_provinciales,
     comparar_registros_provinciales,
@@ -119,7 +120,7 @@ except (RuntimeError, ValueError) as e:
 
 
 # FUNCIÓN DE CARGA CON LA TABLA 'graduados_epespo'
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=60, show_spinner=False)
 def cargar_datos_completos():
   try:
     inspector = inspect(engine)
@@ -692,7 +693,10 @@ def estimar_zona_cantonal(cedula_limpia, prov):
 # =============================================================
 # CARGA Y PROCESAMIENTO ESTRICTO DE DATOS
 # =============================================================
-@st.cache_data(ttl=60)
+@st.cache_data(
+    ttl=60,
+    show_spinner="Conectando y preparando los datos...",
+)
 def cargar_datos_preparados():
   df_raw = cargar_datos_completos()
   if df_raw.empty:
@@ -733,13 +737,7 @@ def cargar_datos_preparados():
   return df_original, df_raw
 
 
-indicador_carga_datos = mostrar_indicador_carga(
-    "Consultando y preparando la información..."
-)
-try:
-  df_original, df_raw = cargar_datos_preparados()
-finally:
-  indicador_carga_datos.empty()
+df_original, df_raw = cargar_datos_preparados()
 
 
 def mostrar_importacion_sidebar():
@@ -1693,51 +1691,222 @@ if seccion_activa == secciones_analiticas[1]:
 
 if seccion_activa == secciones_analiticas[2]:
   st.subheader("Análisis por Área Operativa y Especialidades")
-  if not df_f.empty:
+  enfoque_area = st.segmented_control(
+      "Enfoque rápido por área",
+      [
+          "👁️ Panorama completo",
+          "⚓ Área de Cubierta",
+          "⚙️ Área de Máquinas",
+      ],
+      default="👁️ Panorama completo",
+      key="enfoque_rapido_areas",
+  )
+
+  df_areas_base = df_raw.copy()
+  if prov_sel != "Todas las Provincias":
+    df_areas_base = df_areas_base[
+        df_areas_base["provincia"] == prov_sel
+    ]
+  if curso_sel != "Todas las Especialidades":
+    df_areas_base = df_areas_base[
+        df_areas_base["curso"] == curso_sel
+    ]
+  if mod_sel != "Todas las Modalidades":
+    df_areas_base = df_areas_base[
+        df_areas_base["modalidad"] == mod_sel
+    ]
+  if dni_sidebar:
+    df_areas_base = df_areas_base[
+        df_areas_base["cedula_limpia"]
+        .astype(str)
+        .str.contains(busqueda_dni, na=False, regex=False)
+    ]
+  if ape_sidebar:
+    df_areas_base = df_areas_base[
+        df_areas_base["nombres"]
+        .fillna("")
+        .astype(str)
+        .str.contains(ape_sidebar.strip(), case=False, na=False, regex=False)
+    ]
+
+  area_enfoque = {
+      "👁️ Panorama completo": None,
+      "⚓ Área de Cubierta": "Área de Cubierta",
+      "⚙️ Área de Máquinas": "Área de Máquinas",
+  }[enfoque_area]
+  df_areas_panel = df_areas_base
+  if area_enfoque is not None:
+    df_areas_panel = df_areas_panel[
+        df_areas_panel["area_operativa"] == area_enfoque
+    ]
+  st.caption(
+      "El enfoque rápido reemplaza el filtro global de área en esta sección. "
+      "La comparación de resultados incluye todos los estados de condición."
+  )
+
+  if not df_areas_panel.empty:
+    df_resumen_area, df_resumen_curso = resumir_areas_especialidades(
+        df_areas_panel
+    )
     col_a, col_b = st.columns(2)
     with col_a:
-      df_area = (
-          df_f.groupby("area_operativa").size().reset_index(name="total")
-      )
       fig_pie = px.pie(
-          df_area,
+          df_resumen_area,
           names="area_operativa",
-          values="total",
-          hole=0.4,
+          values="registros",
+          custom_data=["graduados", "no_culmino", "otros"],
+          hole=0.55,
           color_discrete_sequence=px.colors.qualitative.Bold,
+          title="Distribución de registros por área",
+      )
+      fig_pie.update_traces(
+          textinfo="none",
+          hovertemplate=(
+              "<b>%{label}</b><br>"
+              "Registros: %{value:,}<br>"
+              "Participación: %{percent:.3%}<br>"
+              "Graduados: %{customdata[0]:,}<br>"
+              "No culminó: %{customdata[1]:,}<br>"
+              "Otros / sin estado: %{customdata[2]:,}"
+              "<extra></extra>"
+          ),
+      )
+      fig_pie.update_layout(
+          legend_title_text="Área",
+          legend=dict(itemclick="toggle", itemdoubleclick="toggleothers"),
+          margin=dict(t=55, b=20, l=20, r=20),
       )
       st.plotly_chart(fig_pie, use_container_width=True)
     with col_b:
-      df_curso = (
-          df_f.groupby("curso")
-          .size()
-          .reset_index(name="total")
-          .sort_values(by="total", ascending=False)
-          .head(10)
+      df_curso = df_resumen_curso.nlargest(10, "registros").sort_values(
+          "registros"
       )
       fig_bar = px.bar(
           df_curso,
-          x="total",
+          x="registros",
           y="curso",
           orientation="h",
           color_discrete_sequence=["#0EA5E9"],
+          labels={"registros": "Registros", "curso": "Especialidad"},
+          title="10 especialidades con más registros",
       )
-      fig_bar.update_layout(yaxis=dict(autorange="reversed"))
+      fig_bar.update_layout(
+          yaxis=dict(autorange="reversed"),
+          margin=dict(t=55, b=20, l=20, r=20),
+      )
       st.plotly_chart(fig_bar, use_container_width=True)
-    df_area_condicion = (
-        df_f.groupby(["area_operativa", "condicion"], dropna=False)
-        .size()
-        .reset_index(name="registros")
+
+    st.markdown("### Indicadores destacados")
+    col_especialidad, col_desercion = st.columns(2)
+    if not df_resumen_curso.empty:
+      curso_mayor_demanda = df_resumen_curso.sort_values(
+          ["registros", "graduados"],
+          ascending=[False, False],
+      ).iloc[0]
+      col_especialidad.metric(
+          "🏆 Especialidad con más demanda",
+          curso_mayor_demanda["curso"],
+          (
+              f"{int(curso_mayor_demanda['registros']):,} registros · "
+              f"{int(curso_mayor_demanda['graduados']):,} graduados"
+          ),
+          delta_color="off",
+      )
+
+      cursos_con_no_culminacion = df_resumen_curso[
+          df_resumen_curso["no_culmino"] > 0
+      ]
+      if cursos_con_no_culminacion.empty:
+        col_desercion.metric(
+            "⚠️ Mayor porcentaje de no culminación",
+            "Sin casos registrados",
+            "0% en los filtros actuales",
+            delta_color="off",
+        )
+      else:
+        curso_mayor_no_culminacion = cursos_con_no_culminacion.sort_values(
+            ["tasa_no_culminacion", "registros"],
+            ascending=[False, False],
+        ).iloc[0]
+        col_desercion.metric(
+            "⚠️ Mayor porcentaje de no culminación",
+            curso_mayor_no_culminacion["curso"],
+            (
+                f"{curso_mayor_no_culminacion['tasa_no_culminacion']:.1f}% · "
+                f"{int(curso_mayor_no_culminacion['no_culmino']):,} de "
+                f"{int(curso_mayor_no_culminacion['registros']):,} registros"
+            ),
+            delta_color="off",
+        )
+
+    df_resultados_area = df_resumen_area.melt(
+        id_vars="area_operativa",
+        value_vars=["graduados", "no_culmino", "otros"],
+        var_name="condicion_resumen",
+        value_name="registros",
+    )
+    df_resultados_area["condicion_resumen"] = df_resultados_area[
+        "condicion_resumen"
+    ].map(
+        {
+            "graduados": "Graduado",
+            "no_culmino": "No culminó",
+            "otros": "Otros / sin estado",
+        }
     )
     fig_area_condicion = px.bar(
-        df_area_condicion,
+        df_resultados_area,
         x="area_operativa",
         y="registros",
-        color="condicion",
+        color="condicion_resumen",
         barmode="stack",
         title="Resultados por área operativa",
+        labels={
+            "area_operativa": "Área operativa",
+            "registros": "Registros",
+            "condicion_resumen": "Condición",
+        },
+        color_discrete_map={
+            "Graduado": "#10B981",
+            "No culminó": "#F43F5E",
+            "Otros / sin estado": "#94A3B8",
+        },
     )
     st.plotly_chart(fig_area_condicion, use_container_width=True)
+
+    st.markdown("### Resumen cruzado: área y condición final")
+    df_tabla_area = df_resumen_area.rename(
+        columns={
+            "area_operativa": "Área operativa",
+            "registros": "Registros",
+            "graduados": "Graduados",
+            "graduados_pct": "Graduados (%)",
+            "no_culmino": "No culminó",
+            "no_culmino_pct": "No culminó (%)",
+            "otros": "Otros / sin estado",
+            "otros_pct": "Otros / sin estado (%)",
+        }
+    )
+    for columna_porcentaje in (
+        "Graduados (%)",
+        "No culminó (%)",
+        "Otros / sin estado (%)",
+    ):
+      df_tabla_area[columna_porcentaje] = df_tabla_area[
+          columna_porcentaje
+      ].round(1)
+    st.dataframe(
+        df_tabla_area,
+        use_container_width=True,
+        hide_index=True,
+    )
+    st.caption(
+        "Los porcentajes se calculan sobre todos los registros del área; "
+        "los estados distintos de «Graduado» y «No culminó» se agrupan "
+        "como «Otros / sin estado»."
+    )
+  else:
+    st.info("No hay datos para el enfoque y los filtros seleccionados.")
 
 if seccion_activa == secciones_analiticas[3]:
   st.subheader("Demanda de cursos y tasa de graduación")
@@ -2712,9 +2881,10 @@ if seccion_activa == secciones_analiticas[9]:
   )
   st.info(
       "**Planificación, no certificación legal:** la base registra formación "
-      "académica, no tiempo de servicio en el mar. Los umbrales de 2, 2, 3 y "
-      "3 años son referencias de planificación y no confirman que alguien "
-      "cumpla los requisitos de DIRNEA. Las rutas no reconocidas se omiten."
+      "académica, no tiempo de servicio en el mar. Los umbrales configurados "
+      "(Cubierta: 2, 2, 3 y 3 años; Máquinas: 2, 2 y 3 años) son referencias "
+      "de planificación, no confirman que alguien cumpla los requisitos de "
+      "DIRNEA. Las rutas no reconocidas se omiten."
   )
   candidatos_ascenso, demanda_ascenso, totales_ascenso = (
       calcular_candidatos_ascenso(df_raw)
@@ -2748,27 +2918,47 @@ if seccion_activa == secciones_analiticas[9]:
 
   st.markdown("### Demanda potencial por curso objetivo")
   fig_demanda_ascenso = px.bar(
-      demanda_ascenso.sort_values("candidatos"),
+      demanda_ascenso.sort_values(["candidatos", "area"]),
       x="candidatos",
       y="curso_objetivo",
+      color="area",
+      barmode="group",
       orientation="h",
       text="candidatos",
       labels={
           "candidatos": "Personas que alcanzan el umbral de planificación",
           "curso_objetivo": "Curso objetivo",
+          "area": "Área",
       },
-      title="Personas que podrían ser contactadas para cada curso",
+      title="Demanda potencial por área y curso",
   )
   st.plotly_chart(fig_demanda_ascenso, use_container_width=True)
 
   st.markdown("### Lista operativa de candidatos potenciales")
-  cursos_disponibles = demanda_ascenso["curso_objetivo"].tolist()
-  curso_objetivo_seleccionado = st.selectbox(
-      "Filtrar por curso objetivo",
-      options=["Todos"] + cursos_disponibles,
-      key="planificacion_ascensos_curso",
-  )
-  candidatos_filtrados = candidatos_ascenso
+  col_filtro_area, col_filtro_curso = st.columns(2)
+  areas_disponibles = demanda_ascenso["area"].drop_duplicates().tolist()
+  with col_filtro_area:
+    area_seleccionada = st.selectbox(
+        "Filtrar por área",
+        options=["Todas"] + areas_disponibles,
+        key="planificacion_ascensos_area",
+    )
+  candidatos_por_area = candidatos_ascenso
+  cursos_disponibles = demanda_ascenso
+  if area_seleccionada != "Todas":
+    candidatos_por_area = candidatos_por_area[
+        candidatos_por_area["area"] == area_seleccionada
+    ]
+    cursos_disponibles = cursos_disponibles[
+        cursos_disponibles["area"] == area_seleccionada
+    ]
+  with col_filtro_curso:
+    curso_objetivo_seleccionado = st.selectbox(
+        "Filtrar por curso objetivo",
+        options=["Todos"] + cursos_disponibles["curso_objetivo"].tolist(),
+        key="planificacion_ascensos_curso",
+    )
+  candidatos_filtrados = candidatos_por_area
   if curso_objetivo_seleccionado != "Todos":
     candidatos_filtrados = candidatos_filtrados[
         candidatos_filtrados["curso_objetivo"]
@@ -2779,20 +2969,23 @@ if seccion_activa == secciones_analiticas[9]:
       "disponible solo dentro de la sesión autenticada y no incluye "
       "exportación."
   )
+  tabla_candidatos = candidatos_filtrados.rename(
+      columns={
+          "cedula_limpia": "Cédula",
+          "nombres": "Nombre completo",
+          "provincia": "Provincia",
+          "area": "Área",
+          "curso_origen": "Último curso graduado",
+          "curso_objetivo": "Curso objetivo",
+          "fecha_referencia": "Fecha usada para el cálculo",
+          "fuente_fecha": "Origen de la fecha",
+          "tiempo_espera": "Tiempo transcurrido",
+          "umbral_anios": "Umbral de planificación (años)",
+      }
+  ).copy()
+  tabla_candidatos.insert(0, "Estado", "✅ Umbral alcanzado")
   st.dataframe(
-      candidatos_filtrados.rename(
-          columns={
-              "cedula_limpia": "Cédula",
-              "nombres": "Nombre completo",
-              "provincia": "Provincia",
-              "curso_origen": "Último curso graduado",
-              "curso_objetivo": "Curso objetivo",
-              "fecha_referencia": "Fecha usada para el cálculo",
-              "fuente_fecha": "Origen de la fecha",
-              "tiempo_espera": "Tiempo transcurrido",
-              "umbral_anios": "Umbral de planificación (años)",
-          }
-      ),
+      tabla_candidatos,
       use_container_width=True,
       hide_index=True,
   )

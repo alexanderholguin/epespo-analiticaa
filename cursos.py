@@ -8,6 +8,8 @@ _CURSOS_CANONICOS = {
     "ELD": "Estudio Libre Dirigido",
     "ESTUDIO LIBRE DIRIGIDO": "Estudio Libre Dirigido",
     "JEFE DE CUBIERTA DE B/P": "Jefe De Cubierta De B/P",
+    "JEFE DE MAQUINA": "Jefe De Máquinas",
+    "JEFE DE MAQUINAS": "Jefe De Máquinas",
     "MARINERO DE MAQUINAS": "Marinero De Máquinas",
     "MARINERO DE PRIMERA DE MAQUINAS DE B/P":
         "Marinero De Primera De Máquinas De B/P",
@@ -27,6 +29,8 @@ _CURSOS_CANONICOS = {
     "PATRON DE PESCA ARTESANAL": "Patrón De Pesca Artesanal",
     "PATRON DE PESCA COSTANERO": "Patrón De Pesca Costanero",
     "PESCADOR ARTESANAL": "Pescador Artesanal",
+    "PRIMER OFICIAL DE MAQUINA": "Primer Oficial De Máquinas",
+    "PRIMER OFICIAL DE MAQUINAS": "Primer Oficial De Máquinas",
     "TIMONEL/MARINERO DE PUENTE": "Timonel / Marinero De Puente",
 }
 

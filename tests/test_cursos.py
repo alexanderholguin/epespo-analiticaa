@@ -28,6 +28,20 @@ class NormalizarCursoTests(unittest.TestCase):
             {"Marinero De Primera De Puente De B/P"},
         )
 
+    def test_unifica_variantes_de_oficial_y_jefe_de_maquinas(self):
+        variantes = (
+            "Primer Oficial De Maquina",
+            "Primer Oficial De Máquinas",
+        )
+        self.assertEqual(
+            {normalizar_curso(curso) for curso in variantes},
+            {"Primer Oficial De Máquinas"},
+        )
+        self.assertEqual(
+            normalizar_curso("Jefe De Maquina"),
+            "Jefe De Máquinas",
+        )
+
     def test_normaliza_acentos_espacios_y_puntuacion(self):
         self.assertEqual(
             normalizar_curso("  marinero de maquinas "),

@@ -98,6 +98,51 @@ class PlanificacionAscensosTests(unittest.TestCase):
         self.assertNotIn("5", set(candidatos["cedula_limpia"]))
         self.assertEqual(totales["personas_evaluadas"], 3)
 
+    def test_clasifica_rutas_de_maquinas_y_aplica_sus_umbrales(self):
+        datos = pd.DataFrame(
+            {
+                "cedula_limpia": ["6", "7", "8"],
+                "estado_dni": ["Con DNI"] * 3,
+                "nombres": ["Ana", "Luis", "María"],
+                "provincia": ["Manabí"] * 3,
+                "curso": [
+                    "Marinero De Máquinas",
+                    "Marinero De Primera De Máquinas De B/P",
+                    "Primer Oficial De Maquina",
+                ],
+                "es_graduado": [True] * 3,
+                "anio": [2024, 2024, 2023],
+                "mes": [1, 1, 11],
+                "fec_fin": [
+                    "2024-01-01",
+                    "2024-01-01",
+                    "2023-11-17",
+                ],
+            }
+        )
+
+        candidatos, demanda, totales = calcular_candidatos_ascenso(
+            datos,
+            fecha_corte=date(2026, 11, 17),
+        )
+
+        self.assertEqual(totales["candidatos_potenciales"], 3)
+        self.assertEqual(set(candidatos["area"]), {"Máquinas"})
+        self.assertEqual(
+            dict(
+                zip(
+                    candidatos["curso_objetivo"],
+                    candidatos["umbral_anios"],
+                )
+            ),
+            {
+                "Marinero De Primera De Máquinas De B/P": 2,
+                "Primer Oficial De Máquinas": 2,
+                "Jefe De Máquinas": 3,
+            },
+        )
+        self.assertEqual(demanda["candidatos"].sum(), 3)
+
 
 if __name__ == "__main__":
     unittest.main()
