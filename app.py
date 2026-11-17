@@ -21,14 +21,28 @@ import unicodedata
 from auth import crear_gestor_cookies, render_login, cerrar_sesion
 from branding import LOGO_DATA_URI, LOGO_NAVY_DATA_URI, LOGO_PATH
 from cursos import normalizar_curso, resumir_cursos
+from duplicados_trayectoria import (
+    resumir_codigos_impresion,
+    resumir_trayectoria_por_jerarquia,
+)
 from db import (
     COLUMNAS_REGISTRO_IMPORTACION,
     actualizar_registros_ciudadano,
     get_engine,
     insertar_registros_importados,
 )
+from estadisticas_provinciales import (
+    calcular_tasas_graduacion_provinciales,
+    comparar_registros_provinciales,
+)
 from importacion import leer_archivo_importacion
 from modalidades import normalizar_modalidad, resumir_modalidades
+from vedas_atun import (
+    URL_CALENDARIO_OFICIAL,
+    URL_PDF_CALENDARIO_2025,
+    calcular_cursos_en_vedas_atun,
+    obtener_periodos_veda_atun,
+)
 
 st.set_page_config(
     page_title="EPESPO - Suite Analítica y Estratégica Marítima",
@@ -1221,6 +1235,7 @@ if curso_sel != "Todas las Especialidades":
 if mod_sel != "Todas las Modalidades":
   df_f = df_f[df_f["modalidad"] == mod_sel]
 
+df_f_todos_estados = df_f.copy()
 if cond_sel == "Solo Graduados (Cumple)":
   df_f = df_f[df_f["es_graduado"]]
 elif cond_sel == "No culminó":
@@ -1235,9 +1250,20 @@ if dni_sidebar:
       .astype(str)
       .str.contains(busqueda_dni, na=False, regex=False)
   ]
+  df_f_todos_estados = df_f_todos_estados[
+      df_f_todos_estados["cedula_limpia"]
+      .astype(str)
+      .str.contains(busqueda_dni, na=False, regex=False)
+  ]
 if ape_sidebar:
   df_f = df_f[
       df_f["nombres"]
+      .fillna("")
+      .astype(str)
+      .str.contains(ape_sidebar.strip(), case=False, na=False, regex=False)
+  ]
+  df_f_todos_estados = df_f_todos_estados[
+      df_f_todos_estados["nombres"]
       .fillna("")
       .astype(str)
       .str.contains(ape_sidebar.strip(), case=False, na=False, regex=False)
@@ -1300,7 +1326,7 @@ st.markdown(
 )
 
 # =============================================================
-# PESTAÑAS DE NAVEGACIÓN ANALÍTICA (10 PESTAÑAS)
+# SECCIONES DE NAVEGACIÓN ANALÍTICA (11 SECCIONES)
 # =============================================================
 secciones_analiticas = [
     "📈 Evolución Histórica",
@@ -1311,8 +1337,9 @@ secciones_analiticas = [
     "🔮 Proyección & Tendencias",
     "🔍 Auditoría de Datos",
     "🔄 Ciclos y Reingresos",
-    "📋 Base de Datos Completa",
+    "📊 Duplicados y Trayectoria",
     "⚓ Escalafón y Ascensos",
+    "🐟 Veda de Atún",
 ]
 seccion_activa = st.selectbox(
     "Sección de análisis:",
@@ -1395,7 +1422,22 @@ if seccion_activa == secciones_analiticas[0]:
 
 if seccion_activa == secciones_analiticas[1]:
   st.subheader("Distribución Geográfica y Provincial")
-  df_cobertura, _, _ = filtrar_por_periodo(df_f, "cobertura")
+  df_cobertura_total, _, _ = filtrar_por_periodo(
+      df_f_todos_estados,
+      "cobertura",
+  )
+  df_cobertura = df_cobertura_total
+  if cond_sel == "Solo Graduados (Cumple)":
+    df_cobertura = df_cobertura[df_cobertura["es_graduado"]]
+  elif cond_sel == "No culminó":
+    df_cobertura = df_cobertura[
+        df_cobertura["condicion"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .str.casefold()
+        == "no culminó"
+    ]
   if not df_cobertura.empty and "provincia" in df_cobertura.columns:
     col_m1, col_m2 = st.columns([2, 1])
     with col_m1:
@@ -1471,6 +1513,182 @@ if seccion_activa == secciones_analiticas[1]:
           use_container_width=True,
           hide_index=True,
       )
+  else:
+    st.info("No hay datos geográficos para los filtros seleccionados.")
+
+  st.markdown("### Tasa de graduación por provincia")
+  st.caption(
+      "Graduados ÷ total de registros de la provincia. Se muestra el tamaño "
+      "de la muestra y se consideran todos los estados de condición para "
+      "evitar que el filtro de condición altere el denominador."
+  )
+  resumen_tasa_provincia = calcular_tasas_graduacion_provinciales(
+      df_cobertura_total
+  )
+  if resumen_tasa_provincia.empty:
+    st.info("No hay registros para calcular tasas de graduación.")
+  else:
+    tabla_tasa_provincia = resumen_tasa_provincia.rename(
+        columns={
+            "provincia": "Provincia",
+            "registros": "Registros (muestra)",
+            "graduados": "Graduados",
+            "tasa_graduacion": "Tasa de graduación (%)",
+        }
+    )
+    tabla_tasa_provincia["Tasa de graduación (%)"] = (
+        tabla_tasa_provincia["Tasa de graduación (%)"].round(1)
+    )
+    col_tasa_tabla, col_tasa_grafico = st.columns([1, 1.4])
+    with col_tasa_tabla:
+      st.dataframe(
+          tabla_tasa_provincia,
+          use_container_width=True,
+          hide_index=True,
+      )
+    with col_tasa_grafico:
+      fig_tasa_provincia = px.bar(
+          resumen_tasa_provincia.sort_values("tasa_graduacion"),
+          x="tasa_graduacion",
+          y="provincia",
+          orientation="h",
+          text="tasa_graduacion",
+          color="tasa_graduacion",
+          color_continuous_scale="Blues",
+          labels={
+              "tasa_graduacion": "Tasa de graduación (%)",
+              "provincia": "Provincia",
+          },
+          title="Tasa de graduación por provincia",
+      )
+      fig_tasa_provincia.update_traces(
+          texttemplate="%{text:.1f}%",
+          textposition="outside",
+          cliponaxis=False,
+      )
+      fig_tasa_provincia.update_layout(
+          coloraxis_showscale=False,
+          margin=dict(t=45, b=20, l=20, r=35),
+          xaxis_range=[
+              0,
+              min(
+                  105,
+                  max(
+                      10,
+                      float(
+                          resumen_tasa_provincia["tasa_graduacion"].max()
+                      )
+                      * 1.15,
+                  ),
+              ),
+          ],
+      )
+      st.plotly_chart(fig_tasa_provincia, use_container_width=True)
+
+  st.markdown("### Comparación de periodos por provincia")
+  st.caption(
+      "Compara años completos (enero a diciembre). Se respetan los filtros "
+      "globales de provincia, área, curso y modalidad; la comparación "
+      "incluye todos los estados de condición."
+  )
+  anios_comparables = sorted(
+      {
+          int(anio)
+          for anio in df_f_todos_estados["anio"].dropna().unique()
+          if int(anio) > 2000
+      }
+  )
+  if len(anios_comparables) < 2:
+    st.info("Se necesitan al menos dos años con datos para comparar.")
+  else:
+    clave_anio_base = "geografia_anio_base"
+    clave_anio_comparacion = "geografia_anio_comparacion"
+    if st.session_state.get(clave_anio_base) not in anios_comparables:
+      st.session_state[clave_anio_base] = anios_comparables[-2]
+    with st.container():
+      col_anio_base, col_anio_comparacion = st.columns(2)
+      with col_anio_base:
+        anio_base = st.selectbox(
+            "Año base",
+            anios_comparables,
+            key=clave_anio_base,
+        )
+      opciones_anio_comparacion = [
+          anio for anio in anios_comparables if anio != anio_base
+      ]
+      if (
+          st.session_state.get(clave_anio_comparacion)
+          not in opciones_anio_comparacion
+      ):
+        st.session_state[clave_anio_comparacion] = (
+            opciones_anio_comparacion[-1]
+        )
+      with col_anio_comparacion:
+        anio_comparacion = st.selectbox(
+            "Comparar con",
+            opciones_anio_comparacion,
+            key=clave_anio_comparacion,
+        )
+
+    df_comparacion_provincia = comparar_registros_provinciales(
+        df_f_todos_estados,
+        anio_base,
+        anio_comparacion,
+    )
+    if df_comparacion_provincia.empty:
+      st.info("No hay registros para esos años y filtros.")
+    else:
+      tabla_comparacion_provincia = df_comparacion_provincia.rename(
+          columns={
+              "provincia": "Provincia",
+              "registros_base": f"Registros {anio_base}",
+              "registros_comparacion": f"Registros {anio_comparacion}",
+              "cambio": "Cambio neto",
+              "variacion_porcentual": "Variación (%)",
+              "tendencia": "Tendencia",
+          }
+      )
+      tabla_comparacion_provincia["Variación (%)"] = (
+          tabla_comparacion_provincia["Variación (%)"].map(
+              lambda valor: (
+                  "—" if pd.isna(valor) else f"{valor:+.1f}%"
+              )
+          )
+      )
+      col_comparacion_tabla, col_comparacion_grafico = st.columns([1, 1.4])
+      with col_comparacion_tabla:
+        st.dataframe(
+            tabla_comparacion_provincia,
+            use_container_width=True,
+            hide_index=True,
+        )
+      with col_comparacion_grafico:
+        fig_comparacion_provincia = px.bar(
+            df_comparacion_provincia.sort_values("cambio"),
+            x="cambio",
+            y="provincia",
+            orientation="h",
+            color="tendencia",
+            color_discrete_map={
+                "Aumentó": "#10B981",
+                "Disminuyó": "#F43F5E",
+                "Nuevo": "#0284C7",
+                "Sin cambio": "#94A3B8",
+            },
+            labels={
+                "cambio": "Cambio de registros",
+                "provincia": "Provincia",
+                "tendencia": "Tendencia",
+            },
+            title=f"Cambio de {anio_base} a {anio_comparacion}",
+        )
+        fig_comparacion_provincia.update_layout(
+            margin=dict(t=45, b=20, l=20, r=20),
+        )
+        st.plotly_chart(
+            fig_comparacion_provincia,
+            use_container_width=True,
+        )
 
 if seccion_activa == secciones_analiticas[2]:
   st.subheader("Análisis por Área Operativa y Especialidades")
@@ -2340,19 +2558,150 @@ if seccion_activa == secciones_analiticas[7]:
     st.info("No hay DNI y años válidos para analizar ciclos.")
 
 if seccion_activa == secciones_analiticas[8]:
-  st.subheader("📋 Explorador General de Registros y Base de Datos")
-  st.dataframe(
-      df_f[[
-          "cedula_limpia",
-          "nombres",
-          "provincia",
-          "curso",
-          "modalidad",
-          "anio",
-          "condicion",
-      ]],
-      use_container_width=True,
+  st.subheader("Duplicados y trayectoria por jerarquía")
+  st.markdown("### Clasificación por código de impresión")
+  st.caption(
+      "0 = estudiante normal, 1 = recién graduado y 2 = duplicado. "
+      "El conteo es de registros; los DNI se cuentan aparte y sin exponerlos."
   )
+
+  if df_f_todos_estados.empty:
+    st.info("No hay registros con los filtros seleccionados.")
+  else:
+    df_codigos, df_codigos_curso = resumir_codigos_impresion(
+        df_f_todos_estados
+    )
+    resumen_por_codigo = df_codigos.set_index("codigo")
+    col_normal, col_graduado, col_duplicado = st.columns(3)
+    col_normal.metric(
+        "Estudiante normal (código 0)",
+        f"{int(resumen_por_codigo.loc['0', 'registros']):,}",
+    )
+    col_graduado.metric(
+        "Recién graduado (código 1)",
+        f"{int(resumen_por_codigo.loc['1', 'registros']):,}",
+    )
+    col_duplicado.metric(
+        "Duplicado (código 2)",
+        f"{int(resumen_por_codigo.loc['2', 'registros']):,}",
+        help=(
+            "Registros marcados con código 2; no se eliminan ni se "
+            "modifican."
+        ),
+    )
+    st.dataframe(
+        df_codigos.rename(
+            columns={
+                "codigo": "Código",
+                "clasificacion": "Clasificación",
+                "registros": "Registros",
+                "personas_dni": "DNI únicos",
+            }
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    df_cursos_duplicados = (
+        df_codigos_curso[df_codigos_curso["codigo"] == "2"]
+        .nlargest(10, "registros")
+        .sort_values("registros")
+    )
+    if df_cursos_duplicados.empty:
+      st.info("No hay registros marcados como duplicados con estos filtros.")
+    else:
+      fig_cursos_duplicados = px.bar(
+          df_cursos_duplicados,
+          x="registros",
+          y="curso",
+          orientation="h",
+          text="registros",
+          title="Cursos con más registros marcados como duplicados",
+          labels={
+              "registros": "Registros con código 2",
+              "curso": "Curso",
+          },
+      )
+      st.plotly_chart(fig_cursos_duplicados, use_container_width=True)
+
+  st.markdown("### Personas que no avanzaron de jerarquía")
+  st.caption(
+      "El historial completo se agrupa por DNI válido, sin aplicar filtros "
+      "de curso. «Un curso» significa un solo curso distinto registrado; "
+      "no confirma que la persona lo haya aprobado."
+  )
+  df_jerarquia, totales_jerarquia = resumir_trayectoria_por_jerarquia(
+      df_raw
+  )
+  col_una_jerarquia, col_un_curso, col_varios_cursos, col_avance = (
+      st.columns(4)
+  )
+  col_una_jerarquia.metric(
+      "Personas en una jerarquía",
+      (
+          f"{totales_jerarquia['una_jerarquia_un_curso'] + totales_jerarquia['una_jerarquia_varios_cursos']:,}"
+      ),
+  )
+  col_un_curso.metric(
+      "Una jerarquía · un curso distinto",
+      f"{totales_jerarquia['una_jerarquia_un_curso']:,}",
+  )
+  col_varios_cursos.metric(
+      "Una jerarquía · varios cursos",
+      f"{totales_jerarquia['una_jerarquia_varios_cursos']:,}",
+  )
+  col_avance.metric(
+      "Registradas en varias jerarquías",
+      f"{totales_jerarquia['varias_jerarquias']:,}",
+  )
+  if df_jerarquia.empty:
+    if totales_jerarquia["personas_analizadas"]:
+      st.info(
+          "No se encontraron personas limitadas a una sola jerarquía; "
+          "las personas analizadas aparecen en varias jerarquías."
+      )
+    else:
+      st.info("No hay trayectorias con DNI válido y curso clasificado.")
+  else:
+    df_jerarquia_grafico = df_jerarquia.melt(
+        id_vars="jerarquia",
+        value_vars=["un_curso", "varios_cursos"],
+        var_name="trayectoria",
+        value_name="personas",
+    )
+    df_jerarquia_grafico["trayectoria"] = df_jerarquia_grafico[
+        "trayectoria"
+    ].map(
+        {
+            "un_curso": "Un curso distinto",
+            "varios_cursos": "Varios cursos en la misma jerarquía",
+        }
+    )
+    fig_jerarquia = px.bar(
+        df_jerarquia_grafico,
+        x="jerarquia",
+        y="personas",
+        color="trayectoria",
+        barmode="stack",
+        title="Personas en una sola jerarquía, por nivel registrado",
+        labels={
+            "jerarquia": "Jerarquía",
+            "personas": "DNI únicos",
+            "trayectoria": "Cursos distintos",
+        },
+    )
+    st.plotly_chart(fig_jerarquia, use_container_width=True)
+    st.dataframe(
+        df_jerarquia.rename(
+            columns={
+                "jerarquia": "Jerarquía",
+                "un_curso": "Un curso distinto",
+                "varios_cursos": "Varios cursos en la misma jerarquía",
+            }
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
 
 if seccion_activa == secciones_analiticas[9]:
   st.subheader("⚓ Simulador de Carrera y Elegibilidad de Ascensos Marítimos")
@@ -2405,6 +2754,157 @@ if seccion_activa == secciones_analiticas[9]:
         st.warning("El marino cuenta con un solo registro histórico en la base de datos.")
   else:
     st.info("No se encontraron registros con DNI válido para procesar el simulador de escalafón.")
+
+if seccion_activa == secciones_analiticas[10]:
+  st.subheader("Veda de atún en Ecuador")
+  st.caption(
+      "Calendario oficial de 2025 para atunes tropicales: barrilete "
+      "(Katsuwonus pelamis), aleta amarilla (Thunnus albacares) y patudo "
+      "(Thunnus obesus), aplicado a buques de cerco de clases 4, 5 y 6. "
+      "Referencia: Acuerdo Ministerial MPCEIP-SRP-2024-0282-A."
+  )
+
+  df_vedas_atun = obtener_periodos_veda_atun()
+  col_vedas, col_dias, col_anio = st.columns(3)
+  col_vedas.metric("Ventanas publicadas", len(df_vedas_atun))
+  col_dias.metric(
+      "Duración de cada ventana",
+      f"{int(df_vedas_atun['dias'].iloc[0])} días",
+  )
+  col_anio.metric("Calendario de referencia", "2025")
+
+  st.markdown("### Calendario oficial de referencia")
+  tabla_vedas_atun = df_vedas_atun.rename(
+      columns={
+          "periodo": "Ventana",
+          "inicio": "Inicio",
+          "fin": "Fin",
+          "dias": "Días calendario",
+      }
+  )
+  st.dataframe(
+      tabla_vedas_atun,
+      use_container_width=True,
+      hide_index=True,
+  )
+
+  df_grafico_vedas_atun = df_vedas_atun.assign(
+      fin_grafico=(
+          pd.to_datetime(df_vedas_atun["fin"]) + pd.Timedelta(days=1)
+      )
+  )
+  fig_vedas_atun = px.timeline(
+      df_grafico_vedas_atun,
+      x_start="inicio",
+      x_end="fin_grafico",
+      y="periodo",
+      color="periodo",
+      hover_data={
+          "inicio": True,
+          "fin": True,
+          "fin_grafico": False,
+          "dias": True,
+      },
+      title="Ventanas de veda del atún — calendario 2025",
+  )
+  fig_vedas_atun.update_yaxes(autorange="reversed", title_text="")
+  fig_vedas_atun.update_xaxes(title_text="Fecha")
+  fig_vedas_atun.update_layout(
+      showlegend=False,
+      margin=dict(t=50, b=20, l=20, r=20),
+  )
+  st.plotly_chart(fig_vedas_atun, use_container_width=True)
+
+  st.markdown("### Personas con cursos durante las ventanas de veda")
+  st.caption(
+      "Para años anteriores a 2025 se repiten los días y meses del calendario "
+      "2025 únicamente como estimación, no como fechas oficiales. Se usan "
+      "fec_ini/fec_fin cuando existen; si faltan, se estima solo con meses "
+      "completos dentro de la ventana a partir de anio/mes. Las personas se "
+      "deduplican por DNI o, si falta, por nombres y matrícula."
+  )
+
+  df_estadisticas_veda, totales_veda = calcular_cursos_en_vedas_atun(
+      df_f_todos_estados
+  )
+  col_personas_veda, col_registros_veda, col_sin_identidad_veda = st.columns(3)
+  col_personas_veda.metric(
+      "Personas identificables (incluye estimaciones)",
+      f"{totales_veda['personas_unicas']:,}",
+  )
+  col_registros_veda.metric(
+      "Registros de curso coincidentes",
+      f"{totales_veda['registros']:,}",
+  )
+  col_sin_identidad_veda.metric(
+      "Registros sin identidad suficiente",
+      f"{totales_veda['registros_sin_identidad']:,}",
+  )
+
+  if df_estadisticas_veda.empty:
+    st.info(
+        "No hay fechas de curso ni pares de año/mes suficientes para estimar "
+        "coincidencias con las ventanas de veda."
+    )
+  else:
+    df_estadisticas_veda["etiqueta_periodo"] = (
+        df_estadisticas_veda["anio_veda"].astype(str)
+        + " · "
+        + df_estadisticas_veda["periodo"]
+    )
+    fig_personas_veda = px.bar(
+        df_estadisticas_veda,
+        x="etiqueta_periodo",
+        y="personas_unicas",
+        color="referencia",
+        barmode="group",
+        labels={
+            "etiqueta_periodo": "Año de inicio · ventana",
+            "personas_unicas": "Personas identificables",
+            "referencia": "Referencia",
+        },
+        title="Personas con cursos en cada ventana",
+    )
+    fig_personas_veda.update_layout(
+        margin=dict(t=45, b=20, l=20, r=20),
+        xaxis_title="Año de inicio · ventana",
+        yaxis_title="Personas identificables",
+    )
+    st.plotly_chart(fig_personas_veda, use_container_width=True)
+
+    tabla_estadisticas_veda = df_estadisticas_veda.rename(
+        columns={
+            "anio_veda": "Año de inicio",
+            "periodo": "Ventana",
+            "inicio": "Inicio",
+            "fin": "Fin",
+            "dias": "Días de referencia",
+            "referencia": "Tipo de referencia",
+            "personas_unicas": "Personas únicas",
+            "personas_con_fecha_exacta": "Personas con fecha exacta",
+            "personas_estimadas_por_mes": "Personas estimadas por mes",
+            "registros_con_fecha_exacta": "Registros con fecha exacta",
+            "registros_estimados_por_mes": "Registros estimados por mes",
+            "registros_sin_identidad": "Registros sin identidad",
+        }
+    )
+    st.dataframe(
+        tabla_estadisticas_veda.drop(columns=["etiqueta_periodo"]),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+  st.info(
+      "La base de EPESPO contiene registros académicos, no datos de captura, "
+      "embarcaciones ni desembarques; por eso esta sección describe el "
+      "calendario de referencia y coincidencias de cursos, no actividad "
+      "pesquera, cumplimiento ni impacto económico. Las cifras respetan los "
+      "filtros generales y consideran todos los estados de condición."
+  )
+  st.markdown(
+      f"[Consultar calendario oficial de vedas de Ecuador]({URL_CALENDARIO_OFICIAL})"
+      f" · [Abrir PDF oficial 2025]({URL_PDF_CALENDARIO_2025})"
+  )
 
 if indicador_carga_seccion is not None:
   indicador_carga_seccion.empty()
