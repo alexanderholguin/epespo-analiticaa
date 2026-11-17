@@ -37,6 +37,7 @@ from estadisticas_provinciales import (
 )
 from importacion import leer_archivo_importacion
 from modalidades import normalizar_modalidad, resumir_modalidades
+from planificacion_ascensos import calcular_candidatos_ascenso
 from vedas_atun import (
     URL_CALENDARIO_OFICIAL,
     URL_PDF_CALENDARIO_2025,
@@ -1338,7 +1339,7 @@ secciones_analiticas = [
     "🔍 Auditoría de Datos",
     "🔄 Ciclos y Reingresos",
     "📊 Duplicados y Trayectoria",
-    "⚓ Escalafón y Ascensos",
+    "⚓ Panel Estratégico de Ascensos y Planificación",
     "🐟 Veda de Atún",
 ]
 seccion_activa = st.selectbox(
@@ -2704,56 +2705,97 @@ if seccion_activa == secciones_analiticas[8]:
     )
 
 if seccion_activa == secciones_analiticas[9]:
-  st.subheader("⚓ Simulador de Carrera y Elegibilidad de Ascensos Marítimos")
+  st.subheader("⚓ Panel Estratégico de Ascensos y Planificación")
   st.markdown(
-      "Este módulo evalúa la trayectoria profesional de los tripulantes según la normativa oficial de tiempos de experiencia:"
+      "Identifica demanda académica potencial a partir del último curso "
+      "graduado registrado por cada persona."
   )
   st.info(
-      "📌 **Reglas de Ascenso:**\n"
-      "1. **Marinero Pescador ➡️ Marinero 1ra de Puente:** Mínimo 2 años.\n"
-      "2. **Marinero 1ra de Puente ➡️ Patrón Costanero:** Mínimo 2 años.\n"
-      "3. **Patrón Costanero ➡️ Patrón de Altura:** Mínimo 3 años.\n"
-      "4. **Patrón de Altura ➡️ Capitán:** Mínimo 3 años."
+      "**Planificación, no certificación legal:** la base registra formación "
+      "académica, no tiempo de servicio en el mar. Los umbrales de 2, 2, 3 y "
+      "3 años son referencias de planificación y no confirman que alguien "
+      "cumpla los requisitos de DIRNEA. Las rutas no reconocidas se omiten."
+  )
+  candidatos_ascenso, demanda_ascenso, totales_ascenso = (
+      calcular_candidatos_ascenso(df_raw)
+  )
+  col_evaluados, col_listos, col_sin_ruta, col_sin_fecha = st.columns(4)
+  col_evaluados.metric(
+      "Personas evaluadas",
+      f"{totales_ascenso['personas_evaluadas']:,}",
+      help="Personas únicas con DNI válido y al menos un curso graduado.",
+  )
+  col_listos.metric(
+      "Demanda potencial",
+      f"{totales_ascenso['candidatos_potenciales']:,}",
+      help="Personas cuyo tiempo desde el curso alcanza el umbral de planificación.",
+  )
+  col_sin_ruta.metric(
+      "Sin ruta configurada",
+      f"{totales_ascenso['personas_sin_ruta']:,}",
+      help="El último curso graduado no coincide con una ruta reconocida.",
+  )
+  col_sin_fecha.metric(
+      "Sin fecha utilizable",
+      f"{totales_ascenso['sin_fecha']:,}",
+      help="Personas con ruta reconocida, pero sin fecha de curso ni año/mes.",
+  )
+  st.caption(
+      f"Rutas con curso reconocido: {totales_ascenso['personas_con_ruta']:,}. "
+      "Se consideran registros desde 2021 y el historial no usa los "
+      "filtros globales."
   )
 
-  df_con_dni_valido = df_raw[df_raw["estado_dni"] == "Con DNI"].copy()
-  if not df_con_dni_valido.empty:
-    cedulas_disponibles = sorted(df_con_dni_valido["cedula_limpia"].unique().tolist())
-    dni_seleccionado = st.selectbox(
-        "Seleccione o busque el DNI del Marino para auditar su escalafón:",
-        options=cedulas_disponibles,
-        key="simulador_dni_select"
-    )
+  st.markdown("### Demanda potencial por curso objetivo")
+  fig_demanda_ascenso = px.bar(
+      demanda_ascenso.sort_values("candidatos"),
+      x="candidatos",
+      y="curso_objetivo",
+      orientation="h",
+      text="candidatos",
+      labels={
+          "candidatos": "Personas que alcanzan el umbral de planificación",
+          "curso_objetivo": "Curso objetivo",
+      },
+      title="Personas que podrían ser contactadas para cada curso",
+  )
+  st.plotly_chart(fig_demanda_ascenso, use_container_width=True)
 
-    if dni_seleccionado:
-      df_marino = df_con_dni_valido[df_con_dni_valido["cedula_limpia"] == dni_seleccionado].sort_values("anio")
-      nombre_marino = df_marino["nombres"].iloc[0] if not df_marino["nombres"].empty else "Sin nombre registrado"
-
-      st.markdown(f"### Expediente del Marino: **{nombre_marino}** (Cédula: {dni_seleccionado})")
-      
-      st.dataframe(
-          df_marino[["curso", "anio", "mes", "condicion", "provincia", "modalidad"]],
-          use_container_width=True,
-          hide_index=True
-      )
-
-      anios_titulacion = df_marino["anio"].tolist()
-      cursos_titulacion = df_marino["curso"].tolist()
-
-      st.markdown("#### ⏱️ Análisis de Tiempos y Elegibilidad de Ascenso")
-      if len(anios_titulacion) > 1:
-        for i in range(1, len(anios_titulacion)):
-          curso_previo = cursos_titulacion[i-1]
-          anio_previo = anios_titulacion[i-1]
-          curso_actual = cursos_titulacion[i]
-          anio_actual = anios_titulacion[i]
-          diferencia_anios = anio_actual - anio_previo
-
-          st.write(f"• De **{curso_previo}** ({anio_previo}) a **{curso_actual}** ({anio_actual}): **{diferencia_anios} año(s) de diferencia**.")
-      else:
-        st.warning("El marino cuenta con un solo registro histórico en la base de datos.")
-  else:
-    st.info("No se encontraron registros con DNI válido para procesar el simulador de escalafón.")
+  st.markdown("### Lista operativa de candidatos potenciales")
+  cursos_disponibles = demanda_ascenso["curso_objetivo"].tolist()
+  curso_objetivo_seleccionado = st.selectbox(
+      "Filtrar por curso objetivo",
+      options=["Todos"] + cursos_disponibles,
+      key="planificacion_ascensos_curso",
+  )
+  candidatos_filtrados = candidatos_ascenso
+  if curso_objetivo_seleccionado != "Todos":
+    candidatos_filtrados = candidatos_filtrados[
+        candidatos_filtrados["curso_objetivo"]
+        == curso_objetivo_seleccionado
+    ]
+  st.caption(
+      "La lista contiene datos personales para uso institucional. Está "
+      "disponible solo dentro de la sesión autenticada y no incluye "
+      "exportación."
+  )
+  st.dataframe(
+      candidatos_filtrados.rename(
+          columns={
+              "cedula_limpia": "Cédula",
+              "nombres": "Nombre completo",
+              "provincia": "Provincia",
+              "curso_origen": "Último curso graduado",
+              "curso_objetivo": "Curso objetivo",
+              "fecha_referencia": "Fecha usada para el cálculo",
+              "fuente_fecha": "Origen de la fecha",
+              "tiempo_espera": "Tiempo transcurrido",
+              "umbral_anios": "Umbral de planificación (años)",
+          }
+      ),
+      use_container_width=True,
+      hide_index=True,
+  )
 
 if seccion_activa == secciones_analiticas[10]:
   st.subheader("Veda de atún en Ecuador")
