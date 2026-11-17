@@ -1,5 +1,6 @@
 from calendar import monthrange
 from datetime import datetime
+from hashlib import sha256
 from html import escape
 from io import BytesIO
 import os
@@ -19,7 +20,15 @@ import unicodedata
 
 from auth import crear_gestor_cookies, render_login, cerrar_sesion
 from branding import LOGO_DATA_URI, LOGO_NAVY_DATA_URI, LOGO_PATH
-from db import actualizar_registros_ciudadano, get_engine
+from cursos import normalizar_curso, resumir_cursos
+from db import (
+    COLUMNAS_REGISTRO_IMPORTACION,
+    actualizar_registros_ciudadano,
+    get_engine,
+    insertar_registros_importados,
+)
+from importacion import leer_archivo_importacion
+from modalidades import normalizar_modalidad, resumir_modalidades
 
 st.set_page_config(
     page_title="EPESPO - Suite Analítica y Estratégica Marítima",
@@ -423,21 +432,6 @@ def normalizar_provincia(prov_raw):
   return correcciones.get(p, p)
 
 
-def normalizar_curso(curso_raw):
-  if pd.isna(curso_raw):
-    return "Sin Especificar"
-  nfkd_form = unicodedata.normalize("NFKD", str(curso_raw))
-  c = "".join([char for char in nfkd_form if not unicodedata.combining(char)])
-  c = c.strip().upper().replace(".", "")
-  if c in ["ELD", "ESTUDIO LIBRE DIRIGIDO"]:
-    return "Estudio Libre Dirigido"
-  elif "MARINERO DE MAQUINAS" in c:
-    return "Marinero De Máquinas"
-  elif "OPERADOR DE MAQUINAS" in c:
-    return "Operador De Máquinas"
-  return " ".join(c.split()).title()
-
-
 def clasificar_area_operativa(curso):
   nfkd_form = unicodedata.normalize("NFKD", str(curso))
   c = "".join(
@@ -697,7 +691,7 @@ def cargar_datos_preparados():
   df_raw["cedula_limpia"] = df_raw["cedula"].apply(limpiar_dni)
   df_raw["estado_dni"] = df_raw["cedula"].apply(clasificar_dni)
   df_raw["curso"] = df_raw["curso"].apply(normalizar_curso)
-  df_raw["modalidad"] = df_raw["modalidad"].apply(limpiar_texto_general)
+  df_raw["modalidad"] = df_raw["modalidad"].apply(normalizar_modalidad)
   df_raw["provincia"] = df_raw["provincia"].apply(normalizar_provincia)
   df_raw["es_graduado"] = (
       df_raw["condicion"]
@@ -731,9 +725,95 @@ try:
   df_original, df_raw = cargar_datos_preparados()
 finally:
   indicador_carga_datos.empty()
-if df_raw.empty:
-  st.error("No se encontraron registros en la base de datos.")
-  st.stop()
+
+
+def mostrar_importacion_sidebar():
+  resultado_importacion = st.session_state.pop(
+      "_resultado_importacion",
+      None,
+  )
+  if resultado_importacion:
+    st.sidebar.success(resultado_importacion)
+
+  if st.session_state.get("rol") != "admin":
+    return
+
+  with st.sidebar.expander("📥 Actualizar base de datos", expanded=False):
+    st.caption(
+        "Agrega filas nuevas desde CSV o Excel. No borra ni modifica "
+        "registros existentes; omite duplicados idénticos."
+    )
+    st.download_button(
+        "Descargar plantilla CSV",
+        data=(
+            ",".join(COLUMNAS_REGISTRO_IMPORTACION) + "\n"
+        ).encode("utf-8-sig"),
+        file_name="plantilla_registros_epespo.csv",
+        mime="text/csv",
+        use_container_width=True,
+        key="descargar_plantilla_importacion",
+    )
+    archivo = st.file_uploader(
+        "Selecciona un archivo CSV o Excel (.xlsx)",
+        type=["csv", "xlsx"],
+        key="archivo_importacion_registros",
+    )
+    if archivo is None:
+      return
+
+    try:
+      df_importacion = leer_archivo_importacion(archivo)
+    except (
+        OSError,
+        UnicodeDecodeError,
+        ValueError,
+        pd.errors.ParserError,
+    ) as error:
+      st.error(f"No se pudo validar el archivo: {error}")
+      return
+
+    hash_archivo = sha256(archivo.getvalue()).hexdigest()
+    if st.session_state.get("_archivo_importado_digest") == hash_archivo:
+      st.info("Este archivo ya fue procesado en esta sesión.")
+      return
+
+    st.caption(f"Filas válidas para revisar: {len(df_importacion):,}")
+    st.dataframe(
+        df_importacion.head(5),
+        hide_index=True,
+        height=180,
+    )
+    confirmar = st.checkbox(
+        "Confirmo agregar solo filas nuevas, sin borrar datos.",
+        key=f"confirmar_importacion_{hash_archivo}",
+    )
+    if st.button(
+        "Importar filas nuevas",
+        type="primary",
+        use_container_width=True,
+        disabled=not confirmar,
+        key="importar_registros_epespo",
+    ):
+      try:
+        with st.spinner("Validando y guardando los registros..."):
+          insertados, duplicados = insertar_registros_importados(
+              df_importacion
+          )
+      except (
+          OSError,
+          RuntimeError,
+          SQLAlchemyError,
+          TypeError,
+          ValueError,
+      ) as error:
+        st.error(f"No se pudo actualizar la base de datos: {error}")
+      else:
+        st.session_state["_archivo_importado_digest"] = hash_archivo
+        st.session_state["_resultado_importacion"] = (
+            f"Importación completada: {insertados:,} filas nuevas agregadas; "
+            f"{duplicados:,} duplicados idénticos omitidos."
+        )
+        st.rerun()
 
 
 # =============================================================
@@ -759,6 +839,47 @@ st.sidebar.button(
     use_container_width=True,
     key="cerrar_sesion_button",
 )
+mostrar_importacion_sidebar()
+if not df_raw.empty:
+  with st.sidebar.expander("📊 Modalidades unificadas", expanded=False):
+    cantidad_original = df_original["modalidad"].nunique(dropna=False)
+    cantidad_unificada = df_raw["modalidad"].nunique(dropna=False)
+    st.caption(
+        f"Categorías: {cantidad_original} en origen → "
+        f"{cantidad_unificada} unificadas."
+    )
+    resumen_modalidades = resumir_modalidades(df_original["modalidad"])
+    if resumen_modalidades.empty:
+      st.caption("No se encontraron nombres alternativos.")
+    else:
+      st.dataframe(
+          resumen_modalidades,
+          hide_index=True,
+          height=220,
+      )
+  with st.sidebar.expander("📊 Cursos unificados", expanded=False):
+    cantidad_cursos_originales = df_original["curso"].nunique(dropna=False)
+    cantidad_cursos_unificados = df_raw["curso"].nunique(dropna=False)
+    st.caption(
+        f"Categorías: {cantidad_cursos_originales} en origen → "
+        f"{cantidad_cursos_unificados} unificadas."
+    )
+    resumen_cursos = resumir_cursos(df_original["curso"])
+    if resumen_cursos.empty:
+      st.caption("No se encontraron nombres alternativos.")
+    else:
+      st.dataframe(
+          resumen_cursos,
+          hide_index=True,
+          height=220,
+      )
+
+if df_raw.empty:
+  st.warning(
+      "No hay registros en la base de datos. Un administrador puede "
+      "cargar un archivo desde la barra lateral."
+  )
+  st.stop()
 
 
 def limpiar_busqueda_ciudadano():
@@ -2109,6 +2230,7 @@ if seccion_activa == secciones_analiticas[6]:
             df_original.loc[datos.index].assign(
                 cedula_limpia=datos["cedula_limpia"],
                 estado_dni=datos["estado_dni"],
+                curso=datos["curso"],
             )
             if not datos.empty
             else pd.DataFrame(columns=df_original.columns)

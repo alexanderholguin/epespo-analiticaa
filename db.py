@@ -5,7 +5,28 @@ import os
 import streamlit as st
 import pandas as pd
 import psycopg2
-from sqlalchemy import create_engine, text
+from sqlalchemy import MetaData, Table, create_engine, inspect, select, text
+
+
+COLUMNAS_REGISTRO_IMPORTACION = (
+    "cedula",
+    "nombres",
+    "matricula",
+    "anio",
+    "mes",
+    "fecha",
+    "fec_ini",
+    "fec_fin",
+    "curso",
+    "modalidad",
+    "provincia",
+    "condicion",
+    "impresion",
+)
+
+_COLUMNAS_FECHA_IMPORTACION = {"fecha", "fec_ini", "fec_fin"}
+_COLUMNAS_NUMERICAS_IMPORTACION = {"anio", "mes", "impresion"}
+_COLUMNAS_IDENTIFICACION_IMPORTACION = {"cedula", "matricula"}
 
 
 def _get_setting(name: str):
@@ -128,6 +149,133 @@ def insertar_registros_masivos(df_nuevo: pd.DataFrame, modo: str = "append") -> 
     except Exception as e:
         st.error(f"Error al actualizar la base de datos en PostgreSQL: {e}")
         return False
+
+
+def _valor_clave_importacion(valor, columna: str):
+    if pd.isna(valor):
+        return None
+
+    if hasattr(valor, "item") and not isinstance(valor, (str, bytes)):
+        valor = valor.item()
+
+    if columna in _COLUMNAS_FECHA_IMPORTACION:
+        fecha = pd.to_datetime(valor, errors="coerce")
+        return None if pd.isna(fecha) else fecha.strftime("%Y-%m-%d")
+
+    if columna in _COLUMNAS_NUMERICAS_IMPORTACION:
+        numero = float(valor)
+        return int(numero) if numero.is_integer() else numero
+
+    if columna in _COLUMNAS_IDENTIFICACION_IMPORTACION:
+        if isinstance(valor, (int, float)) and float(valor).is_integer():
+            return str(int(valor))
+        return str(valor).strip()
+
+    if isinstance(valor, str):
+        return valor.strip()
+    return valor
+
+
+def insertar_registros_importados(df_nuevo: pd.DataFrame) -> tuple[int, int]:
+    if df_nuevo.empty:
+        raise ValueError("El archivo no contiene registros para importar.")
+
+    columnas = tuple(df_nuevo.columns)
+    if set(columnas) != set(COLUMNAS_REGISTRO_IMPORTACION):
+        raise ValueError(
+            "El archivo debe contener exactamente las columnas requeridas "
+            "para los registros de EPESPO."
+        )
+
+    engine = get_engine()
+    filas_nuevas = []
+    duplicados = 0
+
+    with engine.begin() as connection:
+        inspector = inspect(connection)
+        if not inspector.has_table("graduados_epespo"):
+            raise ValueError(
+                "No existe la tabla graduados_epespo. No se creará "
+                "automáticamente para evitar alterar el esquema."
+            )
+
+        tabla = Table(
+            "graduados_epespo",
+            MetaData(),
+            autoload_with=connection,
+        )
+        columnas_tabla = set(tabla.columns.keys())
+        faltantes = set(COLUMNAS_REGISTRO_IMPORTACION) - columnas_tabla
+        desconocidas = set(columnas) - columnas_tabla
+        if faltantes or desconocidas:
+            detalles = []
+            if faltantes:
+                detalles.append(
+                    "faltan en la base: " + ", ".join(sorted(faltantes))
+                )
+            if desconocidas:
+                detalles.append(
+                    "no existen en la base: "
+                    + ", ".join(sorted(desconocidas))
+                )
+            raise ValueError(
+                "El esquema del archivo no coincide con la base de datos ("
+                + "; ".join(detalles)
+                + ")."
+            )
+
+        columnas_generadas = {
+            columna.name
+            for columna in tabla.columns
+            if columna.primary_key
+            or columna.autoincrement is True
+            or columna.identity is not None
+            or columna.computed is not None
+        }
+        conflicto_generadas = columnas_generadas.intersection(columnas)
+        if conflicto_generadas:
+            raise ValueError(
+                "No incluyas columnas generadas por la base de datos: "
+                + ", ".join(sorted(conflicto_generadas))
+                + "."
+            )
+
+        existentes = pd.read_sql(
+            select(*(tabla.c[columna] for columna in columnas)),
+            con=connection,
+        )
+        claves_vistas = {
+            tuple(
+                _valor_clave_importacion(valor, columna)
+                for columna, valor in zip(columnas, fila)
+            )
+            for fila in existentes.itertuples(index=False, name=None)
+        }
+
+        for indice, fila in enumerate(
+            df_nuevo.itertuples(index=False, name=None)
+        ):
+            clave = tuple(
+                _valor_clave_importacion(valor, columna)
+                for columna, valor in zip(columnas, fila)
+            )
+            if clave in claves_vistas:
+                duplicados += 1
+                continue
+            claves_vistas.add(clave)
+            filas_nuevas.append(indice)
+
+        if filas_nuevas:
+            df_nuevo.iloc[filas_nuevas].to_sql(
+                "graduados_epespo",
+                con=connection,
+                if_exists="append",
+                index=False,
+                chunksize=500,
+            )
+
+    st.cache_data.clear()
+    return len(filas_nuevas), duplicados
 
 
 def actualizar_registros_ciudadano(
