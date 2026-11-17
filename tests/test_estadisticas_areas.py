@@ -69,6 +69,28 @@ class EstadisticasAreasTests(unittest.TestCase):
         )
         self.assertIn("tasa_no_culminacion", cursos.columns)
 
+    def test_prepara_resumen_largo_para_grafico_de_condiciones(self):
+        datos = pd.DataFrame(
+            {
+                "area_operativa": ["Área de Cubierta", "Área de Máquinas"],
+                "curso": ["Marinero Pescador", "Marinero De Máquinas"],
+                "es_graduado": [True, False],
+                "condicion": ["Graduado", "No culminó"],
+            }
+        )
+        areas, _ = resumir_areas_especialidades(datos)
+
+        resultados = areas.melt(
+            id_vars="area_operativa",
+            value_vars=["graduados", "no_culmino", "otros"],
+            var_name="condicion_resumen",
+            value_name="cantidad",
+        )
+
+        self.assertEqual(len(resultados), 6)
+        self.assertIn("registros", areas.columns)
+        self.assertIn("cantidad", resultados.columns)
+
 
 if __name__ == "__main__":
     unittest.main()

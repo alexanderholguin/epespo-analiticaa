@@ -36,7 +36,7 @@ from estadisticas_provinciales import (
     calcular_tasas_graduacion_provinciales,
     comparar_registros_provinciales,
 )
-from importacion import leer_archivo_importacion
+from importacion import MAX_TAMANO_IMPORTACION, leer_archivo_importacion
 from modalidades import normalizar_modalidad, resumir_modalidades
 from planificacion_ascensos import calcular_candidatos_ascenso
 from vedas_atun import (
@@ -772,23 +772,38 @@ def mostrar_importacion_sidebar():
         key="archivo_importacion_registros",
     )
     if archivo is None:
+      st.session_state.pop("_archivo_importacion_cache_digest", None)
+      st.session_state.pop("_archivo_importacion_cache_df", None)
       return
 
-    try:
-      df_importacion = leer_archivo_importacion(archivo)
-    except (
-        OSError,
-        UnicodeDecodeError,
-        ValueError,
-        pd.errors.ParserError,
-    ) as error:
-      st.error(f"No se pudo validar el archivo: {error}")
+    contenido_archivo = archivo.getvalue()
+    if len(contenido_archivo) > MAX_TAMANO_IMPORTACION:
+      st.error("El archivo supera el límite de 10 MB.")
       return
 
-    hash_archivo = sha256(archivo.getvalue()).hexdigest()
+    hash_archivo = sha256(contenido_archivo).hexdigest()
     if st.session_state.get("_archivo_importado_digest") == hash_archivo:
       st.info("Este archivo ya fue procesado en esta sesión.")
       return
+    if (
+        st.session_state.get("_archivo_importacion_cache_digest")
+        == hash_archivo
+    ):
+      df_importacion = st.session_state["_archivo_importacion_cache_df"]
+    else:
+      try:
+        with st.spinner("Leyendo y validando el archivo..."):
+          df_importacion = leer_archivo_importacion(archivo)
+      except (
+          OSError,
+          UnicodeDecodeError,
+          ValueError,
+          pd.errors.ParserError,
+      ) as error:
+        st.error(f"No se pudo validar el archivo: {error}")
+        return
+      st.session_state["_archivo_importacion_cache_digest"] = hash_archivo
+      st.session_state["_archivo_importacion_cache_df"] = df_importacion
 
     st.caption(f"Filas válidas para revisar: {len(df_importacion):,}")
     st.dataframe(
@@ -822,6 +837,8 @@ def mostrar_importacion_sidebar():
         st.error(f"No se pudo actualizar la base de datos: {error}")
       else:
         st.session_state["_archivo_importado_digest"] = hash_archivo
+        st.session_state.pop("_archivo_importacion_cache_digest", None)
+        st.session_state.pop("_archivo_importacion_cache_df", None)
         st.session_state["_resultado_importacion"] = (
             f"Importación completada: {insertados:,} filas nuevas agregadas; "
             f"{duplicados:,} duplicados idénticos omitidos."
@@ -1843,7 +1860,7 @@ if seccion_activa == secciones_analiticas[2]:
         id_vars="area_operativa",
         value_vars=["graduados", "no_culmino", "otros"],
         var_name="condicion_resumen",
-        value_name="registros",
+        value_name="cantidad",
     )
     df_resultados_area["condicion_resumen"] = df_resultados_area[
         "condicion_resumen"
@@ -1857,13 +1874,13 @@ if seccion_activa == secciones_analiticas[2]:
     fig_area_condicion = px.bar(
         df_resultados_area,
         x="area_operativa",
-        y="registros",
+        y="cantidad",
         color="condicion_resumen",
         barmode="stack",
         title="Resultados por área operativa",
         labels={
             "area_operativa": "Área operativa",
-            "registros": "Registros",
+            "cantidad": "Registros",
             "condicion_resumen": "Condición",
         },
         color_discrete_map={
