@@ -31,6 +31,15 @@ class NormalizarModalidadTests(unittest.TestCase):
             "Homologación-As",
         )
 
+    def test_unifica_aliases_que_se_normalizaban_en_la_consulta(self):
+        for valor, esperado in (
+            ("ELD", "Estudio Libre Dirigido"),
+            ("Estudio Libre Dirigido", "Estudio Libre Dirigido"),
+            ("NIVELACION", "Nivelación"),
+        ):
+            with self.subTest(valor=valor):
+                self.assertEqual(normalizar_modalidad(valor), esperado)
+
     def test_unifica_valores_sin_registro(self):
         for valor in (None, float("nan"), "NaN", "Nulo", "Sin Registro"):
             with self.subTest(valor=valor):

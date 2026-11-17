@@ -13,14 +13,13 @@ from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.preprocessing import PolynomialFeatures
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.utils.exceptions import IllegalCharacterError
-from sqlalchemy import inspect
 from sqlalchemy.exc import SQLAlchemyError
 import streamlit as st
 import unicodedata
 
 from auth import crear_gestor_cookies, render_login, cerrar_sesion
 from branding import LOGO_DATA_URI, LOGO_NAVY_DATA_URI, LOGO_PATH
-from cursos import normalizar_curso, resumir_cursos
+from cursos import normalizar_curso
 from duplicados_trayectoria import (
     resumir_codigos_impresion,
     resumir_trayectoria_por_jerarquia,
@@ -32,13 +31,19 @@ from db import (
     insertar_registros_importados,
 )
 from estadisticas_areas import resumir_areas_especialidades
+from estadisticas_historicas import (
+    calcular_crecimiento_interanual,
+    resumir_evolucion,
+)
 from estadisticas_provinciales import (
     calcular_tasas_graduacion_provinciales,
     comparar_registros_provinciales,
 )
 from importacion import MAX_TAMANO_IMPORTACION, leer_archivo_importacion
-from modalidades import normalizar_modalidad, resumir_modalidades
+from geografia import estimar_zonas_cantonales
+from modalidades import normalizar_modalidad
 from planificacion_ascensos import calcular_candidatos_ascenso
+from preparacion_datos import mapear_valores_unicos
 from vedas_atun import (
     URL_CALENDARIO_OFICIAL,
     URL_PDF_CALENDARIO_2025,
@@ -120,49 +125,13 @@ except (RuntimeError, ValueError) as e:
 
 
 # FUNCIÓN DE CARGA CON LA TABLA 'graduados_epespo'
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def cargar_datos_completos():
   try:
-    inspector = inspect(engine)
-    if not inspector.has_table("graduados_epespo"):
-      st.error(
-          "⚠️ La conexión fue exitosa, pero la tabla 'graduados_epespo' no"
-          " existe en esta base de datos."
-      )
-      st.stop()
-
-    query = """
-        WITH registros AS (
-            SELECT
-                graduados_epespo.*,
-                regexp_replace(
-                    translate(
-                        lower(COALESCE(modalidad::text, '')),
-                        'áéíóúü',
-                        'aeiouu'
-                    ),
-                    '[^a-z0-9]',
-                    '',
-                    'g'
-                ) AS modalidad_clave_analitica
-            FROM graduados_epespo
-        )
-        SELECT
-            registros.*,
-            CASE
-                WHEN modalidad_clave_analitica IN (
-                    'eld',
-                    'estudiolibredirigido'
-                )
-                    THEN 'Estudio Libre Dirigido'
-                WHEN modalidad_clave_analitica = 'nivelacion'
-                    THEN 'Nivelación'
-                ELSE NULLIF(BTRIM(registros.modalidad::text), '')
-            END AS modalidad_analitica
-        FROM registros
-    """
-    df = pd.read_sql(query, con=engine)
-    return df.drop(columns=["modalidad_clave_analitica"])
+    return pd.read_sql(
+        "SELECT * FROM graduados_epespo",
+        con=engine,
+    )
   except Exception as e:
     st.error(f"Error al consultar la base de datos: {e}")
     st.stop()
@@ -497,21 +466,6 @@ def clasificar_escala_nautica(curso):
   return "1. Marinería Base y Artesanal"
 
 
-def clasificar_tipo_estudiante(fila):
-  if "impresion" in fila and pd.notna(fila["impresion"]):
-    try:
-      val = int(float(fila["impresion"]))
-      if val == 2:
-        return "Duplicado (Cód. 2)"
-      elif val == 1:
-        return "Recién Graduado (Cód. 1)"
-      elif val == 0:
-        return "Estudiante Normal (Cód. 0)"
-    except (ValueError, TypeError):
-      pass
-  return "Estudiante Normal (Cód. 0)"
-
-
 def limpiar_dni(val):
   if pd.isna(val):
     return ""
@@ -657,44 +611,11 @@ def clasificar_dni(val):
   return "Con DNI" if len(digits) == 10 else "DNI irregular"
 
 
-def estimar_zona_cantonal(cedula_limpia, prov):
-  s = str(cedula_limpia).strip()
-  if not s.isdigit() or len(s) < 3:
-    return "No Determinado"
-  d3 = int(s[2])
-  if prov == "Manabí":
-    if d3 in [0, 1]:
-      return "Manta / Montecristi / Jaramijó"
-    elif d3 in [2, 3]:
-      return "Portoviejo y Cuenca Central"
-    elif d3 in [4, 5]:
-      return "Sucre / San Vicente / Bahía"
-    elif d3 in [6, 7]:
-      return "Pedernales / Jama / Cojimíes"
-    else:
-      return "Zona Sur (Jipijapa / Puerto López)"
-  elif prov == "Guayas":
-    if d3 in [0, 1, 2]:
-      return "Guayaquil Metropolitano"
-    elif d3 in [3, 4]:
-      return "Playas / Posorja / Golfo"
-    else:
-      return "Cantones Fluviales (Durán / Daule)"
-  elif prov == "Esmeraldas":
-    if d3 in [0, 1, 2]:
-      return "Esmeraldas / Atacames"
-    else:
-      return "San Lorenzo / Eloy Alfaro"
-  elif prov == "Santa Elena":
-    return "La Libertad / Salinas / Santa Elena"
-  return f"Cantones de {prov}"
-
-
 # =============================================================
 # CARGA Y PROCESAMIENTO ESTRICTO DE DATOS
 # =============================================================
 @st.cache_data(
-    ttl=60,
+    ttl=600,
     show_spinner="Conectando y preparando los datos...",
 )
 def cargar_datos_preparados():
@@ -702,16 +623,21 @@ def cargar_datos_preparados():
   if df_raw.empty:
     return df_raw, df_raw
 
-  df_original = df_raw.drop(columns=["modalidad_analitica"]).copy()
-  df_raw["modalidad"] = df_raw["modalidad_analitica"].fillna(
-      df_raw["modalidad"]
+  df_original = df_raw.copy()
+  df_raw["cedula_limpia"] = df_raw["cedula"].map(limpiar_dni)
+  df_raw["estado_dni"] = df_raw["cedula"].map(clasificar_dni)
+  df_raw["curso"] = mapear_valores_unicos(
+      df_raw["curso"],
+      normalizar_curso,
   )
-  df_raw.drop(columns=["modalidad_analitica"], inplace=True)
-  df_raw["cedula_limpia"] = df_raw["cedula"].apply(limpiar_dni)
-  df_raw["estado_dni"] = df_raw["cedula"].apply(clasificar_dni)
-  df_raw["curso"] = df_raw["curso"].apply(normalizar_curso)
-  df_raw["modalidad"] = df_raw["modalidad"].apply(normalizar_modalidad)
-  df_raw["provincia"] = df_raw["provincia"].apply(normalizar_provincia)
+  df_raw["modalidad"] = mapear_valores_unicos(
+      df_raw["modalidad"],
+      normalizar_modalidad,
+  )
+  df_raw["provincia"] = mapear_valores_unicos(
+      df_raw["provincia"],
+      normalizar_provincia,
+  )
   df_raw["es_graduado"] = (
       df_raw["condicion"]
       .fillna("")
@@ -720,16 +646,40 @@ def cargar_datos_preparados():
       .str.casefold()
       .eq("graduado")
   )
-  df_raw["area_operativa"] = df_raw["curso"].apply(clasificar_area_operativa)
-  df_raw["escala_nautica"] = df_raw["curso"].apply(clasificar_escala_nautica)
-  df_raw["zona_canton"] = df_raw.apply(
-      lambda fila: estimar_zona_cantonal(
-          fila["cedula_limpia"],
-          fila["provincia"],
-      ),
-      axis=1,
+  df_raw["area_operativa"] = mapear_valores_unicos(
+      df_raw["curso"],
+      clasificar_area_operativa,
   )
-  df_raw["tipo_tramite"] = df_raw.apply(clasificar_tipo_estudiante, axis=1)
+  df_raw["escala_nautica"] = mapear_valores_unicos(
+      df_raw["curso"],
+      clasificar_escala_nautica,
+  )
+  df_raw["zona_canton"] = estimar_zonas_cantonales(
+      df_raw["cedula_limpia"],
+      df_raw["provincia"],
+  )
+  impresion_fuente = df_raw.get(
+      "impresion",
+      pd.Series(index=df_raw.index, dtype=object),
+  )
+  impresion = pd.to_numeric(impresion_fuente, errors="coerce")
+  impresion = impresion.replace([np.inf, -np.inf], np.nan).fillna(0)
+  codigos_impresion = np.trunc(
+      impresion.to_numpy(dtype=float)
+  ).astype("int64")
+  df_raw["tipo_tramite"] = np.select(
+      [
+          codigos_impresion == 2,
+          codigos_impresion == 1,
+          codigos_impresion == 0,
+      ],
+      [
+          "Duplicado (Cód. 2)",
+          "Recién Graduado (Cód. 1)",
+          "Estudiante Normal (Cód. 0)",
+      ],
+      default="Estudiante Normal (Cód. 0)",
+  )
   df_raw["anio"] = (
       pd.to_numeric(df_raw["anio"], errors="coerce").fillna(0).astype(int)
   )
@@ -870,40 +820,6 @@ st.sidebar.button(
     key="cerrar_sesion_button",
 )
 mostrar_importacion_sidebar()
-if not df_raw.empty:
-  with st.sidebar.expander("📊 Modalidades unificadas", expanded=False):
-    cantidad_original = df_original["modalidad"].nunique(dropna=False)
-    cantidad_unificada = df_raw["modalidad"].nunique(dropna=False)
-    st.caption(
-        f"Categorías: {cantidad_original} en origen → "
-        f"{cantidad_unificada} unificadas."
-    )
-    resumen_modalidades = resumir_modalidades(df_original["modalidad"])
-    if resumen_modalidades.empty:
-      st.caption("No se encontraron nombres alternativos.")
-    else:
-      st.dataframe(
-          resumen_modalidades,
-          hide_index=True,
-          height=220,
-      )
-  with st.sidebar.expander("📊 Cursos unificados", expanded=False):
-    cantidad_cursos_originales = df_original["curso"].nunique(dropna=False)
-    cantidad_cursos_unificados = df_raw["curso"].nunique(dropna=False)
-    st.caption(
-        f"Categorías: {cantidad_cursos_originales} en origen → "
-        f"{cantidad_cursos_unificados} unificadas."
-    )
-    resumen_cursos = resumir_cursos(df_original["curso"])
-    if resumen_cursos.empty:
-      st.caption("No se encontraron nombres alternativos.")
-    else:
-      st.dataframe(
-          resumen_cursos,
-          hide_index=True,
-          height=220,
-      )
-
 if df_raw.empty:
   st.warning(
       "No hay registros en la base de datos. Un administrador puede "
@@ -1373,66 +1289,232 @@ if seccion_cambio:
 
 if seccion_activa == secciones_analiticas[0]:
   st.subheader("Evolución anual de registros y resultados")
-  df_evolucion, anio_evolucion, mes_evolucion = filtrar_por_periodo(
-      df_f, "evolucion"
+  df_historico = df_f_todos_estados[
+      df_f_todos_estados["anio"] > 2000
+  ].copy()
+  rango_evolucion = st.segmented_control(
+      "Zoom rápido por periodo",
+      [
+          "Últimos 5 años",
+          "Últimos 10 años",
+          "Histórico completo",
+          "Post-pandemia (2020–actualidad)",
+          "Personalizado",
+      ],
+      default="Histórico completo",
+      key="rango_evolucion_historica",
   )
-  df_evolucion = df_evolucion[df_evolucion["anio"] > 2000].copy()
+
+  anios_disponibles = df_historico["anio"].dropna()
+  anio_maximo = (
+      int(anios_disponibles.max()) if not anios_disponibles.empty else None
+  )
+  anio_evolucion = "Todos"
+  mes_evolucion = "Todos"
+  if rango_evolucion == "Personalizado":
+    df_evolucion, anio_evolucion, mes_evolucion = filtrar_por_periodo(
+        df_historico,
+        "evolucion",
+    )
+  elif anio_maximo is not None:
+    if rango_evolucion == "Últimos 5 años":
+      anio_inicio = anio_maximo - 4
+      df_evolucion = df_historico[
+          df_historico["anio"].between(anio_inicio, anio_maximo)
+      ].copy()
+    elif rango_evolucion == "Últimos 10 años":
+      anio_inicio = anio_maximo - 9
+      df_evolucion = df_historico[
+          df_historico["anio"].between(anio_inicio, anio_maximo)
+      ].copy()
+    elif rango_evolucion == "Post-pandemia (2020–actualidad)":
+      df_evolucion = df_historico[
+          df_historico["anio"].between(2020, anio_maximo)
+      ].copy()
+    else:
+      df_evolucion = df_historico.copy()
+  else:
+    df_evolucion = df_historico.copy()
+
+  st.caption(
+      "La evolución incluye todos los estados para calcular correctamente "
+      "graduación y brecha; respeta los demás filtros globales."
+  )
+  if rango_evolucion != "Personalizado" and anio_maximo is not None:
+    st.caption(f"Rango basado en el último año con registros: {anio_maximo}.")
+
+  if anio_evolucion != "Todos" and mes_evolucion == "Todos":
+    anio_referencia = int(anio_evolucion)
+  elif not df_evolucion.empty:
+    anio_referencia = int(df_evolucion["anio"].max())
+  else:
+    anio_referencia = None
+
+  mes_comparacion = (
+      int(mes_evolucion) if mes_evolucion != "Todos" else None
+  )
+  if anio_referencia is not None:
+    (
+        registros_actuales,
+        registros_anteriores,
+        crecimiento_interanual,
+    ) = calcular_crecimiento_interanual(
+        df_historico,
+        anio_referencia,
+        mes_comparacion,
+    )
+  else:
+    registros_actuales = 0
+    registros_anteriores = 0
+    crecimiento_interanual = None
+
+  resumen_anual = resumir_evolucion(df_evolucion, "anio")
+  resumen_historico_completo = resumir_evolucion(df_historico, "anio")
+  if not resumen_historico_completo.empty:
+    anio_mayor_exito = resumen_historico_completo.sort_values(
+        ["tasa_graduacion", "periodo"],
+        ascending=[False, False],
+    ).iloc[0]
+  else:
+    anio_mayor_exito = None
+
+  kpi_total, kpi_crecimiento, kpi_exito = st.columns(3)
+  with kpi_total:
+    st.metric("Total acumulado", f"{len(df_evolucion):,}")
+  with kpi_crecimiento:
+    if crecimiento_interanual is None:
+      st.metric(
+          "Crecimiento interanual",
+          "—",
+          (
+              f"Sin base para comparar con {anio_referencia - 1}"
+              if anio_referencia is not None
+              else "Sin datos en el periodo"
+          ),
+          delta_color="off",
+      )
+    else:
+      st.metric(
+          "Crecimiento interanual",
+          f"{registros_actuales:,}",
+          f"{crecimiento_interanual:+.1f}% vs. {anio_referencia - 1}",
+          delta_color="normal",
+          help=(
+              "Registros del año actual frente al anterior: "
+              f"{registros_actuales:,} vs. {registros_anteriores:,}."
+          ),
+      )
+  with kpi_exito:
+    if anio_mayor_exito is None:
+      st.metric("Año de mayor éxito", "—", "Sin registros", delta_color="off")
+    else:
+      st.metric(
+          "Año de mayor éxito",
+          str(int(anio_mayor_exito["periodo"])),
+          (
+              f"{anio_mayor_exito['tasa_graduacion']:.1f}% · "
+              f"{int(anio_mayor_exito['graduados']):,}/"
+              f"{int(anio_mayor_exito['registros']):,} registros"
+          ),
+          delta_color="off",
+          help=(
+              "Se calcula sobre todo el histórico disponible, "
+              "independientemente del zoom seleccionado."
+          ),
+      )
+
   if not df_evolucion.empty:
-    if anio_evolucion != "Todos" and mes_evolucion == "Todos":
-      df_evolucion["periodo"] = df_evolucion["mes"].map(
+    mostrar_evolucion_mensual = (
+        anio_evolucion != "Todos" and mes_evolucion == "Todos"
+    )
+    if mostrar_evolucion_mensual:
+      df_grafico_evolucion = df_evolucion.copy()
+      df_grafico_evolucion["periodo"] = df_grafico_evolucion["mes"].map(
           lambda mes: (
               NOMBRES_MESES.get(int(mes), "Mes no registrado")
               if pd.notna(mes)
               else "Mes no registrado"
           )
       )
-      df_evolucion = (
-          df_evolucion.groupby(["periodo", "condicion"], dropna=False)
-          .size()
-          .reset_index(name="registros")
+      resumen_grafico = resumir_evolucion(
+          df_grafico_evolucion,
+          "periodo",
       )
-      fig_line = px.line(
-          df_evolucion,
-          x="periodo",
-          y="registros",
-          color="condicion",
-          markers=True,
-          category_orders={
-              "periodo": list(NOMBRES_MESES.values()) + ["Mes no registrado"]
-          },
-          title=f"Registros mensuales de {anio_evolucion} por condición",
-      )
-      fig_line.update_xaxes(title_text="Mes")
-    else:
-      df_evolucion = (
-          df_evolucion.groupby(["anio", "condicion"], dropna=False)
-          .size()
-          .reset_index(name="registros")
-      )
-      fig_line = px.line(
-          df_evolucion,
-          x="anio",
-          y="registros",
-          color="condicion",
-          markers=True,
-          title=(
-              f"Registros por año y condición"
-              + (
-                  f" · {NOMBRES_MESES[mes_evolucion]}"
-                  if mes_evolucion != "Todos"
-                  else ""
+      resumen_grafico["orden"] = resumen_grafico["periodo"].map(
+          {
+              mes: indice
+              for indice, mes in enumerate(
+                  list(NOMBRES_MESES.values()) + ["Mes no registrado"]
               )
-          ),
+          }
       )
-      fig_line.update_xaxes(title_text="Año")
+      resumen_grafico = resumen_grafico.sort_values("orden")
+      eje_x = "Mes"
+      titulo_grafico = f"Registros mensuales de {anio_evolucion}"
+    else:
+      resumen_grafico = resumen_anual
+      eje_x = "Año"
+      titulo_grafico = (
+          "Registros y graduados por año"
+          + (
+              f" · {NOMBRES_MESES[mes_evolucion]}"
+              if mes_evolucion != "Todos"
+              else ""
+          )
+      )
+
+    fig_line = go.Figure()
+    fig_line.add_trace(
+        go.Scatter(
+            x=resumen_grafico["periodo"],
+            y=resumen_grafico["registros"],
+            name="Total de registros",
+            mode="lines+markers",
+            line=dict(color="#2563eb", width=3),
+            customdata=resumen_grafico[
+                ["graduados", "brecha"]
+            ].to_numpy(),
+            hovertemplate=(
+                "%{x}<br>Total: %{y:,}"
+                "<br>Graduados: %{customdata[0]:,}"
+                "<br>Brecha: %{customdata[1]:,}<extra></extra>"
+            ),
+        )
+    )
+    fig_line.add_trace(
+        go.Scatter(
+            x=resumen_grafico["periodo"],
+            y=resumen_grafico["graduados"],
+            name="Graduados",
+            mode="lines+markers",
+            fill="tonexty",
+            fillcolor="rgba(244, 63, 94, 0.18)",
+            line=dict(color="#16a34a", width=3),
+            customdata=resumen_grafico[
+                ["brecha", "tasa_graduacion"]
+            ].to_numpy(),
+            hovertemplate=(
+                "%{x}<br>Graduados: %{y:,}"
+                "<br>Brecha: %{customdata[0]:,}"
+                "<br>Tasa: %{customdata[1]:.1f}%<extra></extra>"
+            ),
+        )
+    )
     fig_line.update_layout(
+        title=titulo_grafico,
         plot_bgcolor="white",
         paper_bgcolor="white",
-        margin=dict(t=45, b=20, l=20, r=20),
+        margin=dict(t=55, b=20, l=20, r=20),
+        xaxis_title=eje_x,
         yaxis_title="Registros",
-        hovermode="x unified",
+        hovermode="x",
+        legend_title_text="Resultados",
     )
     st.plotly_chart(fig_line, use_container_width=True)
+    st.caption(
+        "El área sombreada muestra la brecha entre registros y graduados; "
+        "no representa por sí sola una deserción confirmada."
+    )
   else:
     st.info("No hay datos suficientes para mostrar la evolución temporal.")
 
@@ -2193,12 +2275,12 @@ if seccion_activa == secciones_analiticas[5]:
         .size()
         .reset_index(name="total")
     )
-    horizonte = st.slider(
+    horizonte = st.selectbox(
         "Años a proyectar",
-        min_value=1,
-        max_value=10,
-        value=5,
-        key="proyeccion_horizonte",
+        options=list(range(1, 11)),
+        index=4,
+        format_func=lambda anios: f"{anios} años",
+        key="proyeccion_horizonte_selector",
     )
     if len(df_p) > 3:
       X = df_p[["anio"]]

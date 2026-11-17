@@ -3,6 +3,8 @@ import unicodedata
 
 import pandas as pd
 
+from preparacion_datos import mapear_valores_unicos
+
 
 _CURSOS_CANONICOS = {
     "ELD": "Estudio Libre Dirigido",
@@ -67,14 +69,15 @@ def normalizar_curso(curso_raw) -> str:
 
 
 def resumir_cursos(cursos: pd.Series) -> pd.DataFrame:
-    originales = cursos.map(
+    originales = mapear_valores_unicos(
+        cursos,
         lambda curso: (
             "(vacío)"
             if pd.isna(curso) or not str(curso).strip()
             else str(curso).strip()
-        )
+        ),
     )
-    unificados = cursos.map(normalizar_curso)
+    unificados = mapear_valores_unicos(cursos, normalizar_curso)
     resumen = (
         pd.DataFrame(
             {

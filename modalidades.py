@@ -3,6 +3,8 @@ import unicodedata
 
 import pandas as pd
 
+from preparacion_datos import mapear_valores_unicos
+
 
 _VALORES_SIN_REGISTRO = {
     "",
@@ -19,6 +21,7 @@ _MODALIDADES_CANONICAS = {
     "ascenso": "Ascenso",
     "capacitacion": "Capacitación",
     "convalidacion": "Convalidación",
+    "eld": "Estudio Libre Dirigido",
     "estudio libre dirigido": "Estudio Libre Dirigido",
     "evaluacion": "Evaluación",
     "formacion": "Formación",
@@ -54,14 +57,15 @@ def normalizar_modalidad(valor) -> str:
 
 
 def resumir_modalidades(modalidades: pd.Series) -> pd.DataFrame:
-    originales = modalidades.map(
+    originales = mapear_valores_unicos(
+        modalidades,
         lambda valor: (
             "(vacío)"
             if pd.isna(valor) or not str(valor).strip()
             else str(valor).strip()
-        )
+        ),
     )
-    unificadas = modalidades.map(normalizar_modalidad)
+    unificadas = mapear_valores_unicos(modalidades, normalizar_modalidad)
     resumen = (
         pd.DataFrame(
             {
