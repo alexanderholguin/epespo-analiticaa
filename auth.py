@@ -6,6 +6,7 @@ import extra_streamlit_components as stx
 import streamlit as st
 from sqlalchemy.exc import SQLAlchemyError
 
+from branding import LOGO_DATA_URI
 from db import (
     guardar_sesion_autenticacion,
     obtener_sesion_autenticacion,
@@ -167,18 +168,12 @@ def aplicar_estilos_login():
             padding: 24px 15px 12px;
         }
 
-        .epespo-logo {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 78px;
-            height: 78px;
-            background: linear-gradient(135deg, #0A376D, #1976D2);
-            border-radius: 22px;
-            color: #FFFFFF;
-            font-size: 38px;
-            box-shadow: 0 10px 25px rgba(21, 101, 192, 0.20);
-            margin-bottom: 20px;
+        .epespo-logo-image {
+            display: block;
+            width: min(220px, 70vw);
+            height: auto;
+            filter: brightness(0) saturate(100%);
+            margin: 0 auto 16px;
         }
 
         .epespo-title {
@@ -321,7 +316,8 @@ def render_login(cookie_manager):
     with login_ui.container():
         html_header = (
             '<div class="epespo-header">'
-            '<div class="epespo-logo">⚓</div>'
+            f'<img class="epespo-logo-image" src="{LOGO_DATA_URI}" '
+            'alt="Logo EPESPO">'
             '<div class="epespo-title">EPESPO | SUITE MARÍTIMA</div>'
             '<div class="epespo-subtitle">'
             'Plataforma Institucional de Inteligencia Analítica'

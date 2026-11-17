@@ -18,11 +18,12 @@ import streamlit as st
 import unicodedata
 
 from auth import crear_gestor_cookies, render_login, cerrar_sesion
+from branding import LOGO_DATA_URI, LOGO_PATH
 from db import actualizar_registros_ciudadano, get_engine
 
 st.set_page_config(
     page_title="EPESPO - Suite Analítica y Estratégica Marítima",
-    page_icon="🧭",
+    page_icon=str(LOGO_PATH),
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -278,8 +279,10 @@ st.markdown(
         box-shadow: 0 10px 25px -5px rgba(10, 37, 64, 0.2);
         display: flex;
         align-items: center;
-        justify-content: space-between;
+        justify-content: flex-start;
+        gap: 20px;
     }
+    .hero-logo { width: 96px; height: auto; flex-shrink: 0; }
     .hero-title { font-size: 24px; font-weight: 800; margin: 0; color: #FFFFFF; }
     .hero-subtitle { font-size: 13.5px; color: #D1E4FF; margin-top: 4px; margin-bottom: 0; }
     .kpi-container {
@@ -335,7 +338,13 @@ st.markdown(
     
     div[data-testid="stPlotlyChart"] { background: #FFFFFF; border: 1px solid #E4EBF4; border-radius: 15px; padding: 7px; box-shadow: 0 3px 12px rgba(15,54,102,.025); }
     div[data-testid="stDataFrame"] { border: 1px solid #E3EAF4; border-radius: 12px; overflow: hidden; }
+    .sidebar-brand img { display: block; width: min(180px, 100%); height: auto; margin: 0 auto 14px; filter: brightness(0) saturate(100%); }
     .sidebar-user-card { background: #0A2540; color: white; padding: 12px 16px; border-radius: 10px; margin-bottom: 14px; }
+    @media (max-width: 640px) {
+        .hero-banner { padding: 18px; gap: 14px; }
+        .hero-logo { width: 68px; }
+        .hero-title { font-size: 18px; }
+    }
 </style>
 """,
     unsafe_allow_html=True,
@@ -724,6 +733,10 @@ if df_raw.empty:
 # SIDEBAR / CONTROLES GLOBALES Y FILTROS
 # =============================================================
 st.sidebar.markdown(
+    f'<div class="sidebar-brand"><img src="{LOGO_DATA_URI}" alt="Logo EPESPO"></div>',
+    unsafe_allow_html=True,
+)
+st.sidebar.markdown(
     f"""
     <div class="sidebar-user-card">
         <div style="font-size: 11px; text-transform: uppercase; color: #93C5FD; font-weight: 700;">Usuario Activo</div>
@@ -1106,10 +1119,11 @@ if ape_sidebar:
 # BANNER PRINCIPAL
 # =============================================================
 st.markdown(
-    """
+    f"""
     <div class="hero-banner">
+        <img class="hero-logo" src="{LOGO_DATA_URI}" alt="Logo EPESPO">
         <div>
-            <h1 class="hero-title">⚓ ESCUELA DE PESCA DEL PACÍFICO ORIENTAL (EPESPO)</h1>
+            <h1 class="hero-title">ESCUELA DE PESCA DEL PACÍFICO ORIENTAL (EPESPO)</h1>
             <p class="hero-subtitle">Plataforma de Inteligencia Analítica Marítima, Control de Flota y Gestión de Titulaciones</p>
         </div>
     </div>
