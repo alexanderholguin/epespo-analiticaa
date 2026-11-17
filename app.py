@@ -614,39 +614,51 @@ def estimar_zona_cantonal(cedula_limpia, prov):
 # =============================================================
 # CARGA Y PROCESAMIENTO ESTRICTO DE DATOS
 # =============================================================
-df_raw = cargar_datos_completos()
+@st.cache_data(ttl=60)
+def cargar_datos_preparados():
+  df_raw = cargar_datos_completos()
+  if df_raw.empty:
+    return df_raw, df_raw
+
+  df_original = df_raw.drop(columns=["modalidad_analitica"]).copy()
+  df_raw["modalidad"] = df_raw["modalidad_analitica"].fillna(
+      df_raw["modalidad"]
+  )
+  df_raw.drop(columns=["modalidad_analitica"], inplace=True)
+  df_raw["cedula_limpia"] = df_raw["cedula"].apply(limpiar_dni)
+  df_raw["estado_dni"] = df_raw["cedula"].apply(clasificar_dni)
+  df_raw["curso"] = df_raw["curso"].apply(normalizar_curso)
+  df_raw["modalidad"] = df_raw["modalidad"].apply(limpiar_texto_general)
+  df_raw["provincia"] = df_raw["provincia"].apply(normalizar_provincia)
+  df_raw["es_graduado"] = (
+      df_raw["condicion"]
+      .fillna("")
+      .astype(str)
+      .str.strip()
+      .str.casefold()
+      .eq("graduado")
+  )
+  df_raw["area_operativa"] = df_raw["curso"].apply(clasificar_area_operativa)
+  df_raw["escala_nautica"] = df_raw["curso"].apply(clasificar_escala_nautica)
+  df_raw["zona_canton"] = df_raw.apply(
+      lambda fila: estimar_zona_cantonal(
+          fila["cedula_limpia"],
+          fila["provincia"],
+      ),
+      axis=1,
+  )
+  df_raw["tipo_tramite"] = df_raw.apply(clasificar_tipo_estudiante, axis=1)
+  df_raw["anio"] = (
+      pd.to_numeric(df_raw["anio"], errors="coerce").fillna(0).astype(int)
+  )
+  df_raw["mes"] = pd.to_numeric(df_raw["mes"], errors="coerce")
+  return df_original, df_raw
+
+
+df_original, df_raw = cargar_datos_preparados()
 if df_raw.empty:
   st.error("No se encontraron registros en la base de datos.")
   st.stop()
-
-df_original = df_raw.drop(columns=["modalidad_analitica"]).copy()
-df_raw["modalidad"] = df_raw["modalidad_analitica"].fillna(df_raw["modalidad"])
-df_raw.drop(columns=["modalidad_analitica"], inplace=True)
-df_raw["cedula_limpia"] = df_raw["cedula"].apply(limpiar_dni)
-df_raw["estado_dni"] = df_raw["cedula"].apply(clasificar_dni)
-df_raw["curso"] = df_raw["curso"].apply(normalizar_curso)
-df_raw["modalidad"] = df_raw["modalidad"].apply(limpiar_texto_general)
-df_raw["provincia"] = df_raw["provincia"].apply(normalizar_provincia)
-df_raw["es_graduado"] = (
-    df_raw["condicion"]
-    .fillna("")
-    .astype(str)
-    .str.strip()
-    .str.casefold()
-    .eq("graduado")
-)
-
-df_raw["area_operativa"] = df_raw["curso"].apply(clasificar_area_operativa)
-df_raw["escala_nautica"] = df_raw["curso"].apply(clasificar_escala_nautica)
-df_raw["zona_canton"] = df_raw.apply(
-    lambda r: estimar_zona_cantonal(r["cedula_limpia"], r["provincia"]), axis=1
-)
-df_raw["tipo_tramite"] = df_raw.apply(clasificar_tipo_estudiante, axis=1)
-
-df_raw["anio"] = (
-    pd.to_numeric(df_raw["anio"], errors="coerce").fillna(0).astype(int)
-)
-df_raw["mes"] = pd.to_numeric(df_raw["mes"], errors="coerce")
 
 
 # =============================================================
@@ -943,6 +955,7 @@ with st.sidebar.expander("🔍 Búsqueda de Ciudadano", expanded=False):
                 )
                 if registros_actualizados:
                   cargar_datos_completos.clear()
+                  cargar_datos_preparados.clear()
                   st.session_state["mensaje_edicion_ciudadano"] = (
                       f"Se actualizaron {registros_actualizados} registro(s) "
                       "existentes; no se insertaron filas."
