@@ -1122,9 +1122,51 @@ seccion_cambio = (
 )
 indicador_carga_seccion = None
 if seccion_cambio:
-  indicador_carga_seccion = st.status(
-      "Cargando sección de análisis...",
-      expanded=False,
+  indicador_carga_seccion = st.empty()
+  indicador_carga_seccion.markdown(
+      """
+      <style>
+      @keyframes epespo-anchor-spin {
+        to { transform: rotate(360deg); }
+      }
+      .epespo-analysis-loader {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        z-index: 999999;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 14px 20px;
+        transform: translate(-50%, -50%);
+        border: 1px solid #dbeafe;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.96);
+        box-shadow: 0 8px 28px rgba(15, 23, 42, 0.18);
+        color: #1e3a8a;
+        font-weight: 600;
+      }
+      .epespo-analysis-loader__ring {
+        display: grid;
+        width: 42px;
+        height: 42px;
+        place-items: center;
+        border: 3px solid #bfdbfe;
+        border-top-color: #0284c7;
+        border-radius: 50%;
+        animation: epespo-anchor-spin 0.9s linear infinite;
+        font-size: 21px;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .epespo-analysis-loader__ring { animation: none; }
+      }
+      </style>
+      <div class="epespo-analysis-loader" role="status" aria-live="polite">
+        <span class="epespo-analysis-loader__ring">⚓</span>
+        <span>Cargando análisis...</span>
+      </div>
+      """,
+      unsafe_allow_html=True,
   )
 
 if seccion_activa == secciones_analiticas[0]:
