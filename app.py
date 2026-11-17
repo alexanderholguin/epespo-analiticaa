@@ -109,6 +109,45 @@ def mostrar_indicador_carga(mensaje):
   return indicador
 
 
+def construir_tarjeta_kpi(
+    etiqueta,
+    valor,
+    detalle,
+    icono,
+    variante="blue",
+    tendencia=None,
+):
+  tendencias = {
+      "positive": ("kpi-trend-positive", "↑"),
+      "negative": ("kpi-trend-negative", "↓"),
+      "neutral": ("kpi-trend-neutral", "→"),
+  }
+  tendencia_html = ""
+  if tendencia is not None:
+    estado_tendencia, texto_tendencia = tendencia
+    clase_tendencia, flecha = tendencias[estado_tendencia]
+    tendencia_html = (
+        f'<div class="kpi-trend {clase_tendencia}">'
+        f'<span aria-hidden="true">{flecha}</span>'
+        f"<span>{escape(str(texto_tendencia))}</span>"
+        "</div>"
+    )
+
+  return f"""
+    <article class="kpi-card kpi-{variante}" aria-label="{escape(str(etiqueta))}">
+      <div class="kpi-card-header">
+        <span class="kpi-icon" aria-hidden="true">{escape(str(icono))}</span>
+        <div class="kpi-label">{escape(str(etiqueta))}</div>
+      </div>
+      <div class="kpi-value">{escape(str(valor))}</div>
+      <div class="kpi-card-footer">
+        {tendencia_html}
+        <div class="kpi-detail">{escape(str(detalle))}</div>
+      </div>
+    </article>
+  """
+
+
 cookie_manager = crear_gestor_cookies()
 if not render_login(cookie_manager):
   st.stop()
@@ -281,35 +320,99 @@ st.markdown(
     .hero-subtitle { font-size: 13.5px; color: #D1E4FF; margin-top: 4px; margin-bottom: 0; }
     .kpi-container {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 16px;
-        margin-bottom: 20px;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+        margin: 0 0 22px;
     }
-    @media (max-width: 1024px) {
-        .kpi-container { grid-template-columns: repeat(2, 1fr); }
-    }
+    .kpi-container-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .kpi-card {
-        background: #FFFFFF;
-        border-radius: 12px;
-        padding: 18px 20px;
-        box-shadow: 0 2px 4px rgba(15, 23, 42, 0.04);
-        border: 1px solid #E2E8F0;
+        display: flex;
+        min-width: 0;
+        min-height: 148px;
+        flex-direction: column;
         position: relative;
         overflow: hidden;
+        padding: 17px 19px 15px;
+        border: 1px solid #E1EAF4;
+        border-radius: 17px;
+        background: linear-gradient(145deg, #FFFFFF 0%, #F8FBFF 100%);
+        box-shadow: 0 7px 20px rgba(15, 54, 102, 0.055);
+        transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
     }
-    .kpi-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px; }
-    .kpi-blue::before { background: #0284C7; }
+    .kpi-card:hover {
+        transform: translateY(-2px);
+        border-color: #C9D8E9;
+        box-shadow: 0 12px 26px rgba(15, 54, 102, 0.10);
+    }
+    .kpi-card::before {
+        content: '';
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 4px;
+        background: #0284C7;
+    }
+    .kpi-card-header { display: flex; align-items: center; gap: 11px; }
+    .kpi-icon {
+        display: grid;
+        width: 38px;
+        height: 38px;
+        flex: 0 0 38px;
+        place-items: center;
+        border-radius: 12px;
+        background: #EAF4FF;
+        color: #0759B8;
+        font-size: 18px;
+    }
+    .kpi-label {
+        color: #52657D;
+        font-size: 11px;
+        font-weight: 750;
+        letter-spacing: .55px;
+        line-height: 1.35;
+        text-transform: uppercase;
+    }
+    .kpi-value {
+        margin-top: 12px;
+        color: #102A43;
+        font-size: clamp(25px, 2.2vw, 33px);
+        font-weight: 800;
+        letter-spacing: -.7px;
+        line-height: 1.12;
+        overflow-wrap: anywhere;
+    }
+    .kpi-card-footer {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+        margin-top: auto;
+        padding-top: 9px;
+    }
+    .kpi-detail { color: #718198; font-size: 11px; line-height: 1.4; }
+    .kpi-trend { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; }
+    .kpi-trend-positive { color: #07805D; }
+    .kpi-trend-negative { color: #C24152; }
+    .kpi-trend-neutral { color: #64748B; }
     .kpi-green::before { background: #10B981; }
-    .kpi-teal::before { background: #0EA5E9; }
+    .kpi-green .kpi-icon { background: #E8F8F1; color: #047857; }
+    .kpi-teal::before { background: #0EA5A4; }
+    .kpi-teal .kpi-icon { background: #E6F8F7; color: #087C7B; }
     .kpi-rose::before { background: #F43F5E; }
+    .kpi-rose .kpi-icon { background: #FFF0F2; color: #BE123C; }
+    .kpi-amber::before { background: #F59E0B; }
+    .kpi-amber .kpi-icon { background: #FFF7E6; color: #B45309; }
 
-    .kpi-label { font-size: 11.5px; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
-    .kpi-value { font-size: 26px; font-weight: 800; color: #0F172A; line-height: 1.15; }
-    .kpi-unit { font-size: 13.5px; font-weight: 500; color: #94A3B8; margin-left: 5px; }
-    .kpi-badge { display: inline-block; margin-top: 8px; padding: 3px 8px; border-radius: 6px; font-size: 11.5px; font-weight: 600; }
-    .badge-green { background: #ECFDF5; color: #047857; }
-    .badge-rose { background: #FFF1F2; color: #BE123C; }
-    .badge-blue { background: #EFF6FF; color: #1D4ED8; }
+    @media (max-width: 1024px) {
+        .kpi-container, .kpi-container-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 640px) {
+        .kpi-container, .kpi-container-3 { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+        .kpi-card { min-height: 132px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .kpi-card { transition: none; }
+        .kpi-card:hover { transform: none; }
+    }
 
     /* Permitir desplazamiento horizontal fluido en la lista de pestañas */
     .stTabs [data-baseweb="tab-list"] { 
@@ -1220,40 +1323,52 @@ st.markdown(
 # =============================================================
 # TARJETAS KPI
 # =============================================================
-total_titulados = len(df_f)
+total_registros_visibles = len(df_f)
 provincias_activas = df_f["provincia"].nunique()
 cursos_activos = df_f["curso"].nunique()
+total_registros_para_tasa = len(df_f_todos_estados)
 tasa_graduacion = (
-    (df_f["es_graduado"].sum() / total_titulados * 100)
-    if total_titulados > 0
+    (
+        df_f_todos_estados["es_graduado"].sum()
+        / total_registros_para_tasa
+        * 100
+    )
+    if total_registros_para_tasa > 0
     else 0
 )
 
+tarjetas_principales = [
+    construir_tarjeta_kpi(
+        "Registros visibles",
+        f"{total_registros_visibles:,}",
+        "Según los filtros globales activos",
+        "📊",
+        "blue",
+    ),
+    construir_tarjeta_kpi(
+        "Tasa de graduación",
+        f"{tasa_graduacion:.1f}%",
+        f"Sobre {total_registros_para_tasa:,} registros y todos sus estados",
+        "🎓",
+        "green",
+    ),
+    construir_tarjeta_kpi(
+        "Provincias cubiertas",
+        f"{provincias_activas:,}",
+        "Con registros visibles",
+        "🗺️",
+        "teal",
+    ),
+    construir_tarjeta_kpi(
+        "Especialidades activas",
+        f"{cursos_activos:,}",
+        "En la selección actual",
+        "⚓",
+        "rose",
+    ),
+]
 st.markdown(
-    f"""
-    <div class="kpi-container">
-        <div class="kpi-card kpi-blue">
-            <div class="kpi-label">Total Registros / Titulados</div>
-            <div class="kpi-value">{total_titulados:,}<span class="kpi-unit">pers.</span></div>
-            <span class="kpi-badge badge-blue">Filtro Activo</span>
-        </div>
-        <div class="kpi-card kpi-green">
-            <div class="kpi-label">Tasa de Aprobación</div>
-            <div class="kpi-value">{tasa_graduacion:.1f}<span class="kpi-unit">%</span></div>
-            <span class="kpi-badge badge-green">Efectividad Histórica</span>
-        </div>
-        <div class="kpi-card kpi-teal">
-            <div class="kpi-label">Provincias de Origen</div>
-            <div class="kpi-value">{provincias_activas}<span class="kpi-unit">prov.</span></div>
-            <span class="kpi-badge badge-blue">Cobertura Nacional</span>
-        </div>
-        <div class="kpi-card kpi-rose">
-            <div class="kpi-label">Especialidades Náuticas</div>
-            <div class="kpi-value">{cursos_activos}<span class="kpi-unit">cursos</span></div>
-            <span class="kpi-badge badge-rose">Oferta Académica</span>
-        </div>
-    </div>
-""",
+    f'<div class="kpi-container">{"".join(tarjetas_principales)}</div>',
     unsafe_allow_html=True,
 )
 
@@ -1378,50 +1493,96 @@ if seccion_activa == secciones_analiticas[0]:
   else:
     anio_mayor_exito = None
 
-  kpi_total, kpi_crecimiento, kpi_exito = st.columns(3)
-  with kpi_total:
-    st.metric("Total acumulado", f"{len(df_evolucion):,}")
-  with kpi_crecimiento:
-    if crecimiento_interanual is None:
-      st.metric(
-          "Crecimiento interanual",
-          "—",
-          (
-              f"Sin base para comparar con {anio_referencia - 1}"
-              if anio_referencia is not None
-              else "Sin datos en el periodo"
-          ),
-          delta_color="off",
-      )
+  if anio_evolucion != "Todos":
+    periodo_kpi = str(anio_evolucion)
+    if mes_evolucion != "Todos":
+      periodo_kpi += f" · {NOMBRES_MESES[int(mes_evolucion)]}"
+  elif not resumen_anual.empty:
+    anio_inicio_kpi = int(resumen_anual["periodo"].min())
+    anio_fin_kpi = int(resumen_anual["periodo"].max())
+    periodo_kpi = (
+        str(anio_inicio_kpi)
+        if anio_inicio_kpi == anio_fin_kpi
+        else f"{anio_inicio_kpi}–{anio_fin_kpi}"
+    )
+  else:
+    periodo_kpi = "Sin datos en el periodo"
+
+  if crecimiento_interanual is None:
+    crecimiento_valor = "—"
+    crecimiento_detalle = (
+        f"Sin datos base del año {anio_referencia - 1}"
+        if anio_referencia is not None
+        else "No hay años disponibles para comparar"
+    )
+    crecimiento_tendencia = None
+    crecimiento_variante = "blue"
+  else:
+    if crecimiento_interanual > 0:
+      estado_crecimiento = "positive"
+      crecimiento_variante = "green"
+    elif crecimiento_interanual < 0:
+      estado_crecimiento = "negative"
+      crecimiento_variante = "rose"
     else:
-      st.metric(
+      estado_crecimiento = "neutral"
+      crecimiento_variante = "blue"
+    crecimiento_valor = f"{crecimiento_interanual:+.1f}%"
+    crecimiento_tendencia = (
+        estado_crecimiento,
+        f"vs. {anio_referencia - 1}",
+    )
+    mes_detalle = (
+        f" · {NOMBRES_MESES[mes_comparacion]}"
+        if mes_comparacion is not None
+        else ""
+    )
+    crecimiento_detalle = (
+        f"{registros_actuales:,} registros en {anio_referencia}{mes_detalle} "
+        f"frente a {registros_anteriores:,} en {anio_referencia - 1}"
+    )
+
+  if anio_mayor_exito is None:
+    exito_valor = "—"
+    exito_detalle = "No hay registros para evaluar"
+  else:
+    exito_valor = str(int(anio_mayor_exito["periodo"]))
+    exito_detalle = (
+        f"{anio_mayor_exito['tasa_graduacion']:.1f}% de graduación · "
+        f"{int(anio_mayor_exito['graduados']):,} de "
+        f"{int(anio_mayor_exito['registros']):,} registros"
+    )
+
+  tarjetas_evolucion = [
+      construir_tarjeta_kpi(
+          "Total acumulado",
+          f"{len(df_evolucion):,}",
+          f"Periodo seleccionado: {periodo_kpi}",
+          "📚",
+          "blue",
+      ),
+      construir_tarjeta_kpi(
           "Crecimiento interanual",
-          f"{registros_actuales:,}",
-          f"{crecimiento_interanual:+.1f}% vs. {anio_referencia - 1}",
-          delta_color="normal",
-          help=(
-              "Registros del año actual frente al anterior: "
-              f"{registros_actuales:,} vs. {registros_anteriores:,}."
-          ),
-      )
-  with kpi_exito:
-    if anio_mayor_exito is None:
-      st.metric("Año de mayor éxito", "—", "Sin registros", delta_color="off")
-    else:
-      st.metric(
+          crecimiento_valor,
+          crecimiento_detalle,
+          "📈",
+          crecimiento_variante,
+          crecimiento_tendencia,
+      ),
+      construir_tarjeta_kpi(
           "Año de mayor éxito",
-          str(int(anio_mayor_exito["periodo"])),
-          (
-              f"{anio_mayor_exito['tasa_graduacion']:.1f}% · "
-              f"{int(anio_mayor_exito['graduados']):,}/"
-              f"{int(anio_mayor_exito['registros']):,} registros"
-          ),
-          delta_color="off",
-          help=(
-              "Se calcula sobre todo el histórico disponible, "
-              "independientemente del zoom seleccionado."
-          ),
-      )
+          exito_valor,
+          exito_detalle,
+          "🏆",
+          "amber",
+      ),
+  ]
+  st.markdown(
+      '<div class="kpi-container kpi-container-3">'
+      + "".join(tarjetas_evolucion)
+      + "</div>",
+      unsafe_allow_html=True,
+  )
 
   if not df_evolucion.empty:
     mostrar_evolucion_mensual = (
@@ -2204,7 +2365,16 @@ if seccion_activa == secciones_analiticas[5]:
         anio_inicio, anio_fin = rango_anios
       else:
         anio_inicio = anio_fin = anios_proyeccion[0]
-        st.metric("Año disponible", anio_inicio)
+        st.markdown(
+            construir_tarjeta_kpi(
+                "Año disponible",
+                str(anio_inicio),
+                "Único año con datos para la proyección",
+                "🗓️",
+                "teal",
+            ),
+            unsafe_allow_html=True,
+        )
     with controles_proyeccion[1]:
       meses_proyeccion = sorted(
           int(mes)
