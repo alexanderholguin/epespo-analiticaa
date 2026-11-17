@@ -18,7 +18,7 @@ import streamlit as st
 import unicodedata
 
 from auth import crear_gestor_cookies, render_login, cerrar_sesion
-from branding import LOGO_DATA_URI, LOGO_PATH
+from branding import LOGO_DATA_URI, LOGO_NAVY_DATA_URI, LOGO_PATH
 from db import actualizar_registros_ciudadano, get_engine
 
 st.set_page_config(
@@ -338,7 +338,14 @@ st.markdown(
     
     div[data-testid="stPlotlyChart"] { background: #FFFFFF; border: 1px solid #E4EBF4; border-radius: 15px; padding: 7px; box-shadow: 0 3px 12px rgba(15,54,102,.025); }
     div[data-testid="stDataFrame"] { border: 1px solid #E3EAF4; border-radius: 12px; overflow: hidden; }
-    .sidebar-brand img { display: block; width: min(180px, 100%); height: auto; margin: 0 auto 14px; filter: brightness(0) saturate(100%); }
+    .sidebar-brand {
+        padding: 10px 12px 4px;
+        margin-bottom: 14px;
+        border: 1px solid #D7E7F5;
+        border-radius: 14px;
+        background: linear-gradient(145deg, #E8F3FB, #FFFFFF);
+    }
+    .sidebar-brand img { display: block; width: min(150px, 100%); height: auto; margin: 0 auto; }
     .sidebar-user-card { background: #0A2540; color: white; padding: 12px 16px; border-radius: 10px; margin-bottom: 14px; }
     @media (max-width: 640px) {
         .hero-banner { padding: 18px; gap: 14px; }
@@ -733,7 +740,7 @@ if df_raw.empty:
 # SIDEBAR / CONTROLES GLOBALES Y FILTROS
 # =============================================================
 st.sidebar.markdown(
-    f'<div class="sidebar-brand"><img src="{LOGO_DATA_URI}" alt="Logo EPESPO"></div>',
+    f'<div class="sidebar-brand"><img src="{LOGO_NAVY_DATA_URI}" alt="Logo EPESPO"></div>',
     unsafe_allow_html=True,
 )
 st.sidebar.markdown(

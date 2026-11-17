@@ -6,7 +6,7 @@ import extra_streamlit_components as stx
 import streamlit as st
 from sqlalchemy.exc import SQLAlchemyError
 
-from branding import LOGO_DATA_URI
+from branding import LOGO_NAVY_DATA_URI
 from db import (
     guardar_sesion_autenticacion,
     obtener_sesion_autenticacion,
@@ -165,15 +165,14 @@ def aplicar_estilos_login():
 
         .epespo-header {
             text-align: center;
-            padding: 24px 15px 12px;
+            padding: 18px 15px 10px;
         }
 
         .epespo-logo-image {
             display: block;
-            width: min(220px, 70vw);
+            width: min(190px, 62vw);
             height: auto;
-            filter: brightness(0) saturate(100%);
-            margin: 0 auto 16px;
+            margin: 0 auto 14px;
         }
 
         .epespo-title {
@@ -200,11 +199,11 @@ def aplicar_estilos_login():
 
         div[data-testid="stForm"] {
             background: #FFFFFF;
-            border: 1px solid #DCE8F5;
-            border-top: 4px solid #1976D2;
-            border-radius: 18px;
+            border: 1px solid #D5E4F0;
+            border-top: 4px solid #1674A5;
+            border-radius: 20px;
             padding: 30px 28px;
-            box-shadow: 0 12px 35px rgba(15, 54, 102, 0.09);
+            box-shadow: 0 16px 42px rgba(15, 54, 102, 0.11);
         }
 
         div[data-testid="stTextInput"] label {
@@ -228,17 +227,18 @@ def aplicar_estilos_login():
         div[data-testid="stFormSubmitButton"] button {
             width: 100%;
             min-height: 47px;
-            background: linear-gradient(90deg, #0D47A1, #1976D2);
+            background: linear-gradient(110deg, #103B70, #1674A5);
             color: #FFFFFF;
             border: none;
             border-radius: 10px;
             font-size: 15px;
             font-weight: 700;
-            transition: all 0.2s ease;
+            box-shadow: 0 6px 16px rgba(16, 59, 112, 0.18);
+            transition: background 0.2s ease, box-shadow 0.2s ease;
         }
 
         div[data-testid="stFormSubmitButton"] button:hover {
-            background: linear-gradient(90deg, #083778, #1565C0);
+            background: linear-gradient(110deg, #0B2C4E, #105E89);
             color: #FFFFFF;
             border: none;
             box-shadow: 0 6px 16px rgba(21, 101, 192, 0.20);
@@ -316,7 +316,7 @@ def render_login(cookie_manager):
     with login_ui.container():
         html_header = (
             '<div class="epespo-header">'
-            f'<img class="epespo-logo-image" src="{LOGO_DATA_URI}" '
+            f'<img class="epespo-logo-image" src="{LOGO_NAVY_DATA_URI}" '
             'alt="Logo EPESPO">'
             '<div class="epespo-title">EPESPO | SUITE MARÍTIMA</div>'
             '<div class="epespo-subtitle">'
