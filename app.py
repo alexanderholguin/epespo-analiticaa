@@ -90,6 +90,7 @@ def cargar_datos_completos():
     st.stop()
 
 
+@st.cache_data(ttl=600, max_entries=3)
 def generar_excel_auditoria(df):
   df_excel = df.copy()
 
@@ -956,6 +957,7 @@ with st.sidebar.expander("🔍 Búsqueda de Ciudadano", expanded=False):
                 if registros_actualizados:
                   cargar_datos_completos.clear()
                   cargar_datos_preparados.clear()
+                  generar_excel_auditoria.clear()
                   st.session_state["mensaje_edicion_ciudadano"] = (
                       f"Se actualizaron {registros_actualizados} registro(s) "
                       "existentes; no se insertaron filas."
@@ -1331,7 +1333,7 @@ if seccion_activa == secciones_analiticas[3]:
           x="total",
           y="curso",
           orientation="h",
-          title="15 cursos con más registros",
+          title=f"{cantidad_cursos} cursos con más registros",
           labels={"total": "Registros", "curso": "Curso"},
           color="total",
           color_continuous_scale="Blues",
@@ -1876,51 +1878,150 @@ if seccion_activa == secciones_analiticas[6]:
 
   anios_disponibles = sorted([int(a) for a in df_raw["anio"].dropna().unique() if a > 2000])
   if anios_disponibles:
-    col_ini, col_fin, col_mes = st.columns(3)
-    with col_ini:
-      anio_desde = st.selectbox("Año inicial:", anios_disponibles, index=0, key="auditoria_anio_desde")
-    with col_fin:
-      anio_hasta = st.selectbox("Año final:", anios_disponibles, index=len(anios_disponibles)-1, key="auditoria_anio_hasta")
-    with col_mes:
-      opciones_meses_descarga = ["Todos los meses"] + list(NOMBRES_MESES.keys())
-      mes_sel_descarga = st.selectbox(
-          "Mes:",
-          opciones_meses_descarga,
-          format_func=lambda valor: "Todos" if valor == "Todos los meses" else NOMBRES_MESES.get(valor, str(valor)),
-          key="auditoria_mes_descarga"
+    opciones_meses_descarga = ["Todos los meses"] + list(
+        NOMBRES_MESES.keys()
+    )
+    periodo_previo = st.session_state.get("auditoria_periodo_aplicado")
+    if periodo_previo and (
+        periodo_previo.get("anio_desde") not in anios_disponibles
+        or periodo_previo.get("anio_hasta") not in anios_disponibles
+        or periodo_previo.get("mes") not in opciones_meses_descarga
+    ):
+      st.session_state.pop("auditoria_periodo_aplicado", None)
+      periodo_previo = None
+    valores_iniciales = {
+        "auditoria_anio_desde": (
+            periodo_previo["anio_desde"]
+            if periodo_previo
+            else anios_disponibles[0]
+        ),
+        "auditoria_anio_hasta": (
+            periodo_previo["anio_hasta"]
+            if periodo_previo
+            else anios_disponibles[-1]
+        ),
+        "auditoria_mes_descarga": (
+            periodo_previo["mes"]
+            if periodo_previo
+            else "Todos los meses"
+        ),
+    }
+    for clave, valor_inicial in valores_iniciales.items():
+      if st.session_state.get(clave) not in (
+          anios_disponibles
+          if clave != "auditoria_mes_descarga"
+          else opciones_meses_descarga
+      ):
+        st.session_state[clave] = valor_inicial
+
+    with st.form("auditoria_periodo_form"):
+      col_ini, col_fin, col_mes = st.columns(3)
+      with col_ini:
+        anio_desde = st.selectbox(
+            "Año inicial:",
+            anios_disponibles,
+            key="auditoria_anio_desde",
+        )
+      with col_fin:
+        anio_hasta = st.selectbox(
+            "Año final:",
+            anios_disponibles,
+            key="auditoria_anio_hasta",
+        )
+      with col_mes:
+        mes_sel_descarga = st.selectbox(
+            "Mes:",
+            opciones_meses_descarga,
+            format_func=lambda valor: (
+                "Todos"
+                if valor == "Todos los meses"
+                else NOMBRES_MESES.get(valor, str(valor))
+            ),
+            key="auditoria_mes_descarga",
+        )
+      aplicar_periodo = st.form_submit_button(
+          "Aplicar periodo",
+          use_container_width=True,
       )
-    
-    df_base_filtrado = df_raw[df_raw["anio"].between(anio_desde, anio_hasta)].copy()
-    if mes_sel_descarga != "Todos los meses":
-      df_base_filtrado = df_base_filtrado[df_base_filtrado["mes"] == mes_sel_descarga]
-      etiqueta_periodo = f"{anio_desde} - {anio_hasta} ({NOMBRES_MESES.get(mes_sel_descarga)})"
+
+    if aplicar_periodo:
+      if anio_desde > anio_hasta:
+        st.session_state.pop("auditoria_periodo_aplicado", None)
+        st.error("El año inicial no puede ser posterior al año final.")
+      else:
+        st.session_state["auditoria_periodo_aplicado"] = {
+            "anio_desde": anio_desde,
+            "anio_hasta": anio_hasta,
+            "mes": mes_sel_descarga,
+        }
+
+    periodo_aplicado = st.session_state.get("auditoria_periodo_aplicado")
+    if periodo_aplicado:
+      anio_desde = periodo_aplicado["anio_desde"]
+      anio_hasta = periodo_aplicado["anio_hasta"]
+      mes_sel_descarga = periodo_aplicado["mes"]
+      df_base_filtrado = df_raw[
+          df_raw["anio"].between(anio_desde, anio_hasta)
+      ].copy()
+      if mes_sel_descarga != "Todos los meses":
+        df_base_filtrado = df_base_filtrado[
+            df_base_filtrado["mes"] == mes_sel_descarga
+        ]
+        etiqueta_periodo = (
+            f"{anio_desde} - {anio_hasta} "
+            f"({NOMBRES_MESES.get(mes_sel_descarga)})"
+        )
+      else:
+        etiqueta_periodo = (
+            f"{anio_desde} - {anio_hasta} (Todos los meses)"
+        )
     else:
-      etiqueta_periodo = f"{anio_desde} - {anio_hasta} (Todos los meses)"
+      st.info(
+          "Selecciona un rango y pulsa «Aplicar periodo» para preparar "
+          "las descargas."
+      )
+      df_base_filtrado = None
   else:
     df_base_filtrado = df_raw.copy()
     etiqueta_periodo = "Histórico completo"
 
-  df_todos_export = df_base_filtrado.copy()
-  df_sin_dni_export = df_base_filtrado[df_base_filtrado["estado_dni"] == "Sin DNI"].copy()
-  df_completos_export = df_base_filtrado[mascara_informacion_completa(df_base_filtrado)].copy()
+  if df_base_filtrado is not None:
+    df_todos_export = df_base_filtrado.copy()
+    df_sin_dni_export = df_base_filtrado[
+        df_base_filtrado["estado_dni"] == "Sin DNI"
+    ].copy()
+    df_completos_export = df_base_filtrado[
+        mascara_informacion_completa(df_base_filtrado)
+    ].copy()
 
-  opciones_descarga_bruta = {
-      "todos": (f"Todos los registros [{etiqueta_periodo}]", df_todos_export),
-      "sin_dni": (f"Registros sin DNI [{etiqueta_periodo}]", df_sin_dni_export),
-      "completos": (f"DNI e info completa [{etiqueta_periodo}]", df_completos_export),
-  }
+    opciones_descarga_bruta = {
+        "todos": (
+            f"Todos los registros [{etiqueta_periodo}]",
+            df_todos_export,
+        ),
+        "sin_dni": (
+            f"Registros sin DNI [{etiqueta_periodo}]",
+            df_sin_dni_export,
+        ),
+        "completos": (
+            f"DNI e info completa [{etiqueta_periodo}]",
+            df_completos_export,
+        ),
+    }
 
-  opciones_descarga = {
-      clave: (
-          titulo,
-          df_original.loc[datos.index].assign(
-              cedula_limpia=datos["cedula_limpia"],
-              estado_dni=datos["estado_dni"],
-          ) if not datos.empty else pd.DataFrame(columns=df_original.columns)
-      )
-      for clave, (titulo, datos) in opciones_descarga_bruta.items()
-  }
-  mostrar_botones_descarga_auditoria(opciones_descarga)
+    opciones_descarga = {
+        clave: (
+            titulo,
+            df_original.loc[datos.index].assign(
+                cedula_limpia=datos["cedula_limpia"],
+                estado_dni=datos["estado_dni"],
+            )
+            if not datos.empty
+            else pd.DataFrame(columns=df_original.columns)
+        )
+        for clave, (titulo, datos) in opciones_descarga_bruta.items()
+    }
+    mostrar_botones_descarga_auditoria(opciones_descarga)
 
 if seccion_activa == secciones_analiticas[7]:
   st.subheader("Ciclos de participación y reingresos potenciales")

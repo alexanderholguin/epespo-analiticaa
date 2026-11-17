@@ -106,6 +106,21 @@ def _eliminar_cookie_sesion(cookie_manager):
         )
 
 
+def _guardar_cookie_sesion(cookie_manager, token):
+    if cookie_manager.get(cookie=COOKIE_SESION) == token:
+        return
+
+    cookie_manager.set(
+        COOKIE_SESION,
+        token,
+        key="set_epespo_auth_cookie",
+        max_age=DIAS_PERSISTENCIA_COOKIE * 24 * 60 * 60,
+        expires_at=datetime.now() + timedelta(days=DIAS_PERSISTENCIA_COOKIE),
+        secure=_cookie_segura(),
+        same_site="strict",
+    )
+
+
 def _cookie_segura():
     valor = os.environ.get("AUTH_COOKIE_SECURE", "true")
     return valor.strip().lower() in {"1", "true", "yes"}
@@ -275,6 +290,7 @@ def render_login(cookie_manager):
         token = st.session_state.get("_token_sesion")
         usuario = st.session_state.get("usuario")
         if token and usuario in USUARIOS_PERMITIDOS:
+            _guardar_cookie_sesion(cookie_manager, token)
             return _establecer_sesion(usuario, token)
         if token:
             try:
@@ -375,22 +391,9 @@ def render_login(cookie_manager):
                                     usuario_normalizado,
                                     token,
                                 )
-                                cookie_manager.set(
-                                    COOKIE_SESION,
+                                _guardar_cookie_sesion(
+                                    cookie_manager,
                                     token,
-                                    key="set_epespo_auth_cookie",
-                                    max_age=(
-                                        DIAS_PERSISTENCIA_COOKIE
-                                        * 24
-                                        * 60
-                                        * 60
-                                    ),
-                                    expires_at=datetime.now()
-                                    + timedelta(
-                                        days=DIAS_PERSISTENCIA_COOKIE
-                                    ),
-                                    secure=_cookie_segura(),
-                                    same_site="strict",
                                 )
                                 login_ui.empty()
                                 return True
