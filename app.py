@@ -109,43 +109,20 @@ def mostrar_indicador_carga(mensaje):
   return indicador
 
 
-def construir_tarjeta_kpi(
-    etiqueta,
-    valor,
-    detalle,
-    icono,
-    variante="blue",
-    tendencia=None,
-):
-  tendencias = {
-      "positive": ("kpi-trend-positive", "↑"),
-      "negative": ("kpi-trend-negative", "↓"),
-      "neutral": ("kpi-trend-neutral", "→"),
-  }
-  tendencia_html = ""
-  if tendencia is not None:
-    estado_tendencia, texto_tendencia = tendencia
-    clase_tendencia, flecha = tendencias[estado_tendencia]
-    tendencia_html = (
-        f'<div class="kpi-trend {clase_tendencia}">'
-        f'<span aria-hidden="true">{flecha}</span>'
-        f"<span>{escape(str(texto_tendencia))}</span>"
-        "</div>"
-    )
-
-  return f"""
-    <article class="kpi-card kpi-{variante}" aria-label="{escape(str(etiqueta))}">
-      <div class="kpi-card-header">
-        <span class="kpi-icon" aria-hidden="true">{escape(str(icono))}</span>
-        <div class="kpi-label">{escape(str(etiqueta))}</div>
-      </div>
-      <div class="kpi-value">{escape(str(valor))}</div>
-      <div class="kpi-card-footer">
-        {tendencia_html}
-        <div class="kpi-detail">{escape(str(detalle))}</div>
-      </div>
-    </article>
-  """
+def mostrar_tarjetas_kpi(tarjetas):
+  columnas = st.columns(len(tarjetas), gap="small")
+  for columna, tarjeta in zip(columnas, tarjetas):
+    with columna:
+      etiqueta = tarjeta["etiqueta"]
+      if tarjeta.get("icono"):
+        etiqueta = f"{tarjeta['icono']} {etiqueta}"
+      st.metric(
+          etiqueta,
+          tarjeta["valor"],
+          delta=tarjeta.get("delta"),
+          delta_color=tarjeta.get("delta_color", "normal"),
+          help=tarjeta.get("detalle"),
+      )
 
 
 cookie_manager = crear_gestor_cookies()
@@ -413,6 +390,33 @@ st.markdown(
     @media (prefers-reduced-motion: reduce) {
         .kpi-card { transition: none; }
         .kpi-card:hover { transform: none; }
+    }
+
+    [data-testid="stMetric"] {
+        min-height: 118px;
+        margin: 0 0 18px;
+        padding: 13px 15px 12px;
+        border: 1px solid #DFE8F2;
+        border-radius: 12px;
+        background: #FFFFFF;
+        box-shadow: 0 4px 14px rgba(15, 54, 102, 0.055);
+    }
+    [data-testid="stMetricLabel"] {
+        color: #52657D;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: .35px;
+        text-transform: uppercase;
+    }
+    [data-testid="stMetricValue"] {
+        color: #102A43;
+        font-size: clamp(24px, 2vw, 31px);
+        font-weight: 800;
+        letter-spacing: -.55px;
+    }
+    [data-testid="stMetricDelta"] {
+        font-size: 12px;
+        font-weight: 700;
     }
 
     /* Permitir desplazamiento horizontal fluido en la lista de pestañas */
@@ -1338,40 +1342,34 @@ tasa_graduacion = (
     else 0
 )
 
-tarjetas_principales = [
-    construir_tarjeta_kpi(
-        "Registros visibles",
-        f"{total_registros_visibles:,}",
-        "Según los filtros globales activos",
-        "📊",
-        "blue",
-    ),
-    construir_tarjeta_kpi(
-        "Tasa de graduación",
-        f"{tasa_graduacion:.1f}%",
-        f"Sobre {total_registros_para_tasa:,} registros y todos sus estados",
-        "🎓",
-        "green",
-    ),
-    construir_tarjeta_kpi(
-        "Provincias cubiertas",
-        f"{provincias_activas:,}",
-        "Con registros visibles",
-        "🗺️",
-        "teal",
-    ),
-    construir_tarjeta_kpi(
-        "Especialidades activas",
-        f"{cursos_activos:,}",
-        "En la selección actual",
-        "⚓",
-        "rose",
-    ),
-]
-st.markdown(
-    f'<div class="kpi-container">{"".join(tarjetas_principales)}</div>',
-    unsafe_allow_html=True,
-)
+mostrar_tarjetas_kpi([
+    {
+        "etiqueta": "Registros visibles",
+        "valor": f"{total_registros_visibles:,}",
+        "detalle": "Según los filtros globales activos",
+        "icono": "📊",
+    },
+    {
+        "etiqueta": "Tasa de graduación",
+        "valor": f"{tasa_graduacion:.1f}%",
+        "detalle": (
+            f"Sobre {total_registros_para_tasa:,} registros y todos sus estados"
+        ),
+        "icono": "🎓",
+    },
+    {
+        "etiqueta": "Provincias cubiertas",
+        "valor": f"{provincias_activas:,}",
+        "detalle": "Con registros visibles",
+        "icono": "🗺️",
+    },
+    {
+        "etiqueta": "Especialidades activas",
+        "valor": f"{cursos_activos:,}",
+        "detalle": "En la selección actual",
+        "icono": "⚓",
+    },
+])
 
 # =============================================================
 # SECCIONES DE NAVEGACIÓN ANALÍTICA (11 SECCIONES)
@@ -1554,36 +1552,37 @@ if seccion_activa == secciones_analiticas[0]:
         f"{int(anio_mayor_exito['registros']):,} registros"
     )
 
-  tarjetas_evolucion = [
-      construir_tarjeta_kpi(
-          "Total acumulado",
-          f"{len(df_evolucion):,}",
-          f"Periodo seleccionado: {periodo_kpi}",
-          "📚",
-          "blue",
+  tarjeta_crecimiento = {
+      "etiqueta": "Crecimiento interanual",
+      "valor": crecimiento_valor,
+      "detalle": crecimiento_detalle,
+      "icono": "📈",
+      "delta": (
+          f"{crecimiento_interanual:+.1f}% vs. {anio_referencia - 1}"
+          if crecimiento_interanual is not None
+          else None
       ),
-      construir_tarjeta_kpi(
-          "Crecimiento interanual",
-          crecimiento_valor,
-          crecimiento_detalle,
-          "📈",
-          crecimiento_variante,
-          crecimiento_tendencia,
+      "delta_color": (
+          "normal"
+          if crecimiento_interanual is not None
+          else "off"
       ),
-      construir_tarjeta_kpi(
-          "Año de mayor éxito",
-          exito_valor,
-          exito_detalle,
-          "🏆",
-          "amber",
-      ),
-  ]
-  st.markdown(
-      '<div class="kpi-container kpi-container-3">'
-      + "".join(tarjetas_evolucion)
-      + "</div>",
-      unsafe_allow_html=True,
-  )
+  }
+  mostrar_tarjetas_kpi([
+      {
+          "etiqueta": "Total acumulado",
+          "valor": f"{len(df_evolucion):,}",
+          "detalle": f"Periodo seleccionado: {periodo_kpi}",
+          "icono": "📚",
+      },
+      tarjeta_crecimiento,
+      {
+          "etiqueta": "Año de mayor éxito",
+          "valor": exito_valor,
+          "detalle": exito_detalle,
+          "icono": "🏆",
+      },
+  ])
 
   if not df_evolucion.empty:
     mostrar_evolucion_mensual = (
@@ -2367,16 +2366,14 @@ if seccion_activa == secciones_analiticas[5]:
         )
       else:
         anio_inicio = anio_fin = anios_proyeccion[0]
-        st.markdown(
-            construir_tarjeta_kpi(
-                "Año disponible",
-                str(anio_inicio),
-                "Único año con datos para la proyección",
-                "🗓️",
-                "teal",
-            ),
-            unsafe_allow_html=True,
-        )
+        mostrar_tarjetas_kpi([
+            {
+                "etiqueta": "Año disponible",
+                "valor": str(anio_inicio),
+                "detalle": "Único año con datos para la proyección",
+                "icono": "🗓️",
+            }
+        ])
     with controles_proyeccion[1]:
       meses_proyeccion = sorted(
           int(mes)
