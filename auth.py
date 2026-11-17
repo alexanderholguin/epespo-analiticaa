@@ -221,8 +221,19 @@ def render_login(cookie_manager=None):
                 unsafe_allow_html=True
             )
 
-            usuario = st.text_input("Usuario", placeholder="Ingrese su usuario", key="login_usuario")
-            password = st.text_input("Contraseña", type="password", placeholder="Ingrese su contraseña", key="login_password")
+            usuario = st.text_input(
+                "Usuario",
+                placeholder="Ingrese su usuario",
+                key="login_usuario",
+                autocomplete="username",
+            )
+            password = st.text_input(
+                "Contraseña",
+                type="password",
+                placeholder="Ingrese su contraseña",
+                key="login_password",
+                autocomplete="current-password",
+            )
 
             st.write("")
 
