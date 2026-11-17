@@ -1,5 +1,6 @@
 from calendar import monthrange
 from datetime import datetime
+from html import escape
 from io import BytesIO
 import os
 import numpy as np
@@ -25,6 +26,57 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+
+
+def mostrar_indicador_carga(mensaje):
+  indicador = st.empty()
+  indicador.markdown(
+      f"""
+      <style>
+      @keyframes epespo-anchor-spin {{
+        to {{ transform: rotate(360deg); }}
+      }}
+      .epespo-analysis-loader {{
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        z-index: 999999;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 14px 20px;
+        transform: translate(-50%, -50%);
+        border: 1px solid #dbeafe;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.96);
+        box-shadow: 0 8px 28px rgba(15, 23, 42, 0.18);
+        color: #1e3a8a;
+        font-weight: 600;
+      }}
+      .epespo-analysis-loader__ring {{
+        display: grid;
+        width: 42px;
+        height: 42px;
+        place-items: center;
+        border: 3px solid #bfdbfe;
+        border-top-color: #0284c7;
+        border-radius: 50%;
+        animation: epespo-anchor-spin 0.9s linear infinite;
+        font-size: 21px;
+      }}
+      @media (prefers-reduced-motion: reduce) {{
+        .epespo-analysis-loader__ring {{ animation: none; }}
+      }}
+      </style>
+      <div class="epespo-analysis-loader" role="status" aria-live="polite">
+        <span class="epespo-analysis-loader__ring">⚓</span>
+        <span>{escape(mensaje)}</span>
+      </div>
+      """,
+      unsafe_allow_html=True,
+  )
+  return indicador
+
 
 cookie_manager = crear_gestor_cookies()
 if not render_login(cookie_manager):
@@ -656,8 +708,13 @@ def cargar_datos_preparados():
   return df_original, df_raw
 
 
-with st.spinner("Consultando y preparando la información..."):
+indicador_carga_datos = mostrar_indicador_carga(
+    "Consultando y preparando la información..."
+)
+try:
   df_original, df_raw = cargar_datos_preparados()
+finally:
+  indicador_carga_datos.empty()
 if df_raw.empty:
   st.error("No se encontraron registros en la base de datos.")
   st.stop()
@@ -707,47 +764,50 @@ with st.sidebar.expander("🔍 Búsqueda de Ciudadano", expanded=False):
 
   if dni_sidebar or ape_sidebar:
     resultados_principales.subheader("Resultado de búsqueda")
-    with st.spinner("Buscando información del ciudadano..."):
-      coincidencias = df_raw.copy()
-      if dni_sidebar:
-        busqueda_dni = "".join(
-            caracter for caracter in dni_sidebar if caracter.isdigit()
-        )
-        if not busqueda_dni:
-          busqueda_dni = dni_sidebar.strip()
-        coincidencias = coincidencias[
-            coincidencias["cedula_limpia"]
-            .astype(str)
-            .str.contains(busqueda_dni, na=False, regex=False)
-        ]
-      if ape_sidebar:
-        coincidencias = coincidencias[
-            coincidencias["nombres"]
-            .fillna("")
-            .astype(str)
-            .str.contains(
-                ape_sidebar.strip(),
-                case=False,
-                na=False,
-                regex=False,
-            )
-        ]
+    indicador_busqueda = mostrar_indicador_carga(
+        "Buscando información del ciudadano..."
+    )
+    coincidencias = df_raw.copy()
+    if dni_sidebar:
+      busqueda_dni = "".join(
+          caracter for caracter in dni_sidebar if caracter.isdigit()
+      )
+      if not busqueda_dni:
+        busqueda_dni = dni_sidebar.strip()
+      coincidencias = coincidencias[
+          coincidencias["cedula_limpia"]
+          .astype(str)
+          .str.contains(busqueda_dni, na=False, regex=False)
+      ]
+    if ape_sidebar:
+      coincidencias = coincidencias[
+          coincidencias["nombres"]
+          .fillna("")
+          .astype(str)
+          .str.contains(
+              ape_sidebar.strip(),
+              case=False,
+              na=False,
+              regex=False,
+          )
+      ]
 
-      grupos_persona = {}
-      for _, fila in coincidencias.iterrows():
-        dni_digitos = "".join(
-            caracter
-            for caracter in str(fila["cedula_limpia"])
-            if caracter.isdigit()
-        )
-        if dni_digitos and set(dni_digitos) != {"0"}:
-          clave_persona = ("dni", dni_digitos)
-        else:
-          nombre_clave = texto_celda(fila["nombres"]).casefold()
-          matricula_clave = texto_celda(fila["matricula"]).casefold()
-          clave_persona = ("sin_dni", nombre_clave, matricula_clave)
-        grupos_persona.setdefault(clave_persona, []).append(fila.name)
-      claves_persona = list(grupos_persona)
+    grupos_persona = {}
+    for _, fila in coincidencias.iterrows():
+      dni_digitos = "".join(
+          caracter
+          for caracter in str(fila["cedula_limpia"])
+          if caracter.isdigit()
+      )
+      if dni_digitos and set(dni_digitos) != {"0"}:
+        clave_persona = ("dni", dni_digitos)
+      else:
+        nombre_clave = texto_celda(fila["nombres"]).casefold()
+        matricula_clave = texto_celda(fila["matricula"]).casefold()
+        clave_persona = ("sin_dni", nombre_clave, matricula_clave)
+      grupos_persona.setdefault(clave_persona, []).append(fila.name)
+    claves_persona = list(grupos_persona)
+    indicador_busqueda.empty()
 
     resultados_principales.caption(
         f"Coincidencias encontradas: {len(coincidencias):,} registros"
@@ -1122,51 +1182,8 @@ seccion_cambio = (
 )
 indicador_carga_seccion = None
 if seccion_cambio:
-  indicador_carga_seccion = st.empty()
-  indicador_carga_seccion.markdown(
-      """
-      <style>
-      @keyframes epespo-anchor-spin {
-        to { transform: rotate(360deg); }
-      }
-      .epespo-analysis-loader {
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        z-index: 999999;
-        display: flex;
-        align-items: center;
-        gap: 14px;
-        padding: 14px 20px;
-        transform: translate(-50%, -50%);
-        border: 1px solid #dbeafe;
-        border-radius: 14px;
-        background: rgba(255, 255, 255, 0.96);
-        box-shadow: 0 8px 28px rgba(15, 23, 42, 0.18);
-        color: #1e3a8a;
-        font-weight: 600;
-      }
-      .epespo-analysis-loader__ring {
-        display: grid;
-        width: 42px;
-        height: 42px;
-        place-items: center;
-        border: 3px solid #bfdbfe;
-        border-top-color: #0284c7;
-        border-radius: 50%;
-        animation: epespo-anchor-spin 0.9s linear infinite;
-        font-size: 21px;
-      }
-      @media (prefers-reduced-motion: reduce) {
-        .epespo-analysis-loader__ring { animation: none; }
-      }
-      </style>
-      <div class="epespo-analysis-loader" role="status" aria-live="polite">
-        <span class="epespo-analysis-loader__ring">⚓</span>
-        <span>Cargando análisis...</span>
-      </div>
-      """,
-      unsafe_allow_html=True,
+  indicador_carga_seccion = mostrar_indicador_carga(
+      "Cargando análisis..."
   )
 
 if seccion_activa == secciones_analiticas[0]:
@@ -1553,7 +1570,6 @@ if seccion_activa == secciones_analiticas[5]:
         rango_anios = st.select_slider(
             "Rango histórico",
             options=anios_proyeccion,
-            value=(anios_proyeccion[0], anios_proyeccion[-1]),
             key=clave_rango,
         )
         anio_inicio, anio_fin = rango_anios
