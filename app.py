@@ -2346,23 +2346,24 @@ if seccion_activa == secciones_analiticas[5]:
     controles_proyeccion = st.columns(4)
     with controles_proyeccion[0]:
       if len(anios_proyeccion) > 1:
-        clave_rango = "proyeccion_rango_anios"
-        rango_actual = st.session_state.get(clave_rango)
-        if (
-            not rango_actual
-            or rango_actual[0] not in anios_proyeccion
-            or rango_actual[1] not in anios_proyeccion
-        ):
-          st.session_state[clave_rango] = (
-              anios_proyeccion[0],
-              anios_proyeccion[-1],
-          )
-        rango_anios = st.select_slider(
-            "Rango histórico",
+        rango_inicio = st.selectbox(
+            "Año inicial",
             options=anios_proyeccion,
-            key=clave_rango,
+            key="proyeccion_anio_inicio",
         )
-        anio_inicio, anio_fin = rango_anios
+        anios_fin = [
+            anio
+            for anio in anios_proyeccion
+            if anio >= st.session_state["proyeccion_anio_inicio"]
+        ]
+        if st.session_state.get("proyeccion_anio_fin") not in anios_fin:
+          st.session_state["proyeccion_anio_fin"] = anios_fin[-1]
+        anio_inicio = st.session_state["proyeccion_anio_inicio"]
+        anio_fin = st.selectbox(
+            "Año final",
+            options=anios_fin,
+            key="proyeccion_anio_fin",
+        )
       else:
         anio_inicio = anio_fin = anios_proyeccion[0]
         st.markdown(
