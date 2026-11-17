@@ -16,7 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 import streamlit as st
 import unicodedata
 
-from auth import crear_gestor_cookies, render_login, cerrar_sesion
+from auth import render_login, cerrar_sesion
 from db import actualizar_registros_ciudadano, get_engine
 
 st.set_page_config(
@@ -26,8 +26,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-cookie_manager = crear_gestor_cookies()
-if not render_login(cookie_manager):
+if not render_login():
   st.stop()
 
 
@@ -42,6 +41,7 @@ except (RuntimeError, ValueError) as e:
 
 
 # FUNCIÓN DE CARGA CON LA TABLA 'graduados_epespo'
+@st.cache_data(ttl=60)
 def cargar_datos_completos():
   try:
     inspector = inspect(engine)
@@ -941,6 +941,7 @@ with st.sidebar.expander("🔍 Búsqueda de Ciudadano", expanded=False):
                     datos_nuevos,
                 )
                 if registros_actualizados:
+                  cargar_datos_completos.clear()
                   st.session_state["mensaje_edicion_ciudadano"] = (
                       f"Se actualizaron {registros_actualizados} registro(s) "
                       "existentes; no se insertaron filas."
@@ -1077,7 +1078,7 @@ st.markdown(
 # =============================================================
 # PESTAÑAS DE NAVEGACIÓN ANALÍTICA (10 PESTAÑAS)
 # =============================================================
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
+secciones_analiticas = [
     "📈 Evolución Histórica",
     "🗺️ Geografía & Cobertura",
     "⚓ Áreas & Especialidades",
@@ -1088,9 +1089,14 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
     "🔄 Ciclos y Reingresos",
     "📋 Base de Datos Completa",
     "⚓ Escalafón y Ascensos",
-])
+]
+seccion_activa = st.selectbox(
+    "Sección de análisis:",
+    secciones_analiticas,
+    key="seccion_analitica",
+)
 
-with tab1:
+if seccion_activa == secciones_analiticas[0]:
   st.subheader("Evolución anual de registros y resultados")
   df_evolucion, anio_evolucion, mes_evolucion = filtrar_por_periodo(
       df_f, "evolucion"
@@ -1155,7 +1161,7 @@ with tab1:
   else:
     st.info("No hay datos suficientes para mostrar la evolución temporal.")
 
-with tab2:
+if seccion_activa == secciones_analiticas[1]:
   st.subheader("Distribución Geográfica y Provincial")
   df_cobertura, _, _ = filtrar_por_periodo(df_f, "cobertura")
   if not df_cobertura.empty and "provincia" in df_cobertura.columns:
@@ -1209,7 +1215,7 @@ with tab2:
           hide_index=True,
       )
 
-with tab3:
+if seccion_activa == secciones_analiticas[2]:
   st.subheader("Análisis por Área Operativa y Especialidades")
   if not df_f.empty:
     col_a, col_b = st.columns(2)
@@ -1257,7 +1263,7 @@ with tab3:
     )
     st.plotly_chart(fig_area_condicion, use_container_width=True)
 
-with tab4:
+if seccion_activa == secciones_analiticas[3]:
   st.subheader("Demanda de cursos y tasa de graduación")
   df_demanda_periodo, _, _ = filtrar_por_periodo(df_f, "demanda")
   if not df_demanda_periodo.empty:
@@ -1346,7 +1352,7 @@ with tab4:
   else:
     st.info("No hay registros con los filtros seleccionados.")
 
-with tab5:
+if seccion_activa == secciones_analiticas[4]:
   st.subheader("Indicadores y trayectoria del curso seleccionado")
   cursos_curso = sorted(df_f["curso"].dropna().unique().tolist())
   if cursos_curso:
@@ -1427,7 +1433,7 @@ with tab5:
   else:
     st.info("No hay cursos disponibles con los filtros seleccionados.")
 
-with tab6:
+if seccion_activa == secciones_analiticas[5]:
   st.subheader("🔮 Modelo Predictivo y Proyección de Titulaciones")
   df_proyeccion = df_f[df_f["es_graduado"] & (df_f["anio"] > 2000)].copy()
   anios_proyeccion = sorted(df_proyeccion["anio"].unique().tolist())
@@ -1589,7 +1595,7 @@ with tab6:
   else:
     st.info("No hay registros de graduados con año válido para proyectar.")
 
-with tab7:
+if seccion_activa == secciones_analiticas[6]:
   st.subheader("Auditoría de DNI y calidad de registros")
   st.caption(
       "“Con DNI” indica un "
@@ -1877,7 +1883,7 @@ with tab7:
   }
   mostrar_botones_descarga_auditoria(opciones_descarga)
 
-with tab8:
+if seccion_activa == secciones_analiticas[7]:
   st.subheader("Ciclos de participación y reingresos potenciales")
   st.caption(
       "Análisis agregado de registros con DNI en formato de 10 dígitos y año "
@@ -1977,7 +1983,7 @@ with tab8:
   else:
     st.info("No hay DNI y años válidos para analizar ciclos.")
 
-with tab9:
+if seccion_activa == secciones_analiticas[8]:
   st.subheader("📋 Explorador General de Registros y Base de Datos")
   st.dataframe(
       df_f[[
@@ -1992,7 +1998,7 @@ with tab9:
       use_container_width=True,
   )
 
-with tab10:
+if seccion_activa == secciones_analiticas[9]:
   st.subheader("⚓ Simulador de Carrera y Elegibilidad de Ascensos Marítimos")
   st.markdown(
       "Este módulo evalúa la trayectoria profesional de los tripulantes según la normativa oficial de tiempos de experiencia:"

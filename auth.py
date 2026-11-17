@@ -1,7 +1,7 @@
 import streamlit as st
 
 # ============================================================
-# EPESPO - SISTEMA DE AUTENTICACIÓN INSTITUCIONAL (SIN COOKIES)
+# EPESPO - SISTEMA DE AUTENTICACIÓN INSTITUCIONAL
 # ============================================================
 
 USUARIOS_PERMITIDOS = {
@@ -16,11 +16,6 @@ USUARIOS_PERMITIDOS = {
         "password": "viewer1234"
     }
 }
-
-
-def crear_gestor_cookies():
-    # Retornamos None ya que no utilizaremos cookies persistentes
-    return None
 
 
 def verificar_credenciales(usuario, password):
@@ -187,7 +182,7 @@ def aplicar_estilos_login():
 # PANTALLA DE INICIO DE SESIÓN
 # ============================================================
 
-def render_login(cookie_manager=None):
+def render_login():
     if st.session_state.get("autenticado"):
         return True
 
